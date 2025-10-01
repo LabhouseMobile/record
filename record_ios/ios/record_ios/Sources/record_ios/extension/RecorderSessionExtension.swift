@@ -80,7 +80,10 @@ extension AudioRecordingDelegate {
         let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
 
         if options.contains(.shouldResume) {
-          do { try resume() } catch {}
+          do {
+            try AVAudioSession.sharedInstance().setActive(true)
+            try resume()
+          } catch {}
         } else {
           stop { path in }
         }
