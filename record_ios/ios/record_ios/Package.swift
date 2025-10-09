@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "record_ios",
     platforms: [
-        .iOS("12.0")
+        .iOS("13.4")
     ],
     products: [
         // If the plugin name contains "_", replace with "-" for the library name.

@@ -96,9 +96,30 @@ public class RecordIosPlugin: NSObject, FlutterPlugin {
       } catch {
         result(FlutterError(code: "record", message: error.localizedDescription, details: nil))
       }
+    case "startStreamDual":
+      guard let config = getConfig(args, result: result) else {
+        return
+      }
+      guard let basePath = args["basePath"] as? String else {
+        result(FlutterError(code: "record", message: "Call missing mandatory parameter basePath.", details: nil))
+        return
+      }
+
+      do {
+        try recorder.startStreamDual(config: config, basePath: basePath)
+        result(nil)
+      } catch RecorderError.error(let message, let details) {
+        result(FlutterError(code: "record", message: message, details: details))
+      } catch {
+        result(FlutterError(code: "record", message: error.localizedDescription, details: nil))
+      }
     case "stop":
       recorder.stop { path in
         result(path)
+      }
+    case "stopDual":
+      recorder.stopDual { map in
+        result(map)
       }
     case "cancel":
       do {

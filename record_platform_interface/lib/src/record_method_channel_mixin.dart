@@ -63,8 +63,7 @@ mixin RecordMethodChannel implements RecordMethodChannelPlatformInterface {
   }
 
   @override
-  Future<void> start(String recorderId, RecordConfig config,
-      {required String path}) {
+  Future<void> start(String recorderId, RecordConfig config, {required String path}) {
     return _methodChannel.invokeMethod('start', {
       'recorderId': recorderId,
       'path': path,
@@ -86,9 +85,27 @@ mixin RecordMethodChannel implements RecordMethodChannelPlatformInterface {
       ...config.toMap(),
     });
 
-    return eventRecordChannel
-        .receiveBroadcastStream()
-        .map<Uint8List>((data) => data);
+    return eventRecordChannel.receiveBroadcastStream().map<Uint8List>((data) => data);
+  }
+
+  @override
+  Future<Stream<Uint8List>> startStreamDual(
+    String recorderId,
+    RecordConfig config, {
+    required String basePath,
+  }) async {
+    final eventRecordChannel = EventChannel(
+      'com.llfbandit.record/eventsRecord/$recorderId',
+    );
+
+    await _methodChannel.invokeMethod('startStreamDual', {
+      'recorderId': recorderId,
+      'path': basePath + '.m4a',
+      'basePath': basePath,
+      ...config.toMap(),
+    });
+
+    return eventRecordChannel.receiveBroadcastStream().map<Uint8List>((data) => data);
   }
 
   @override
@@ -99,6 +116,19 @@ mixin RecordMethodChannel implements RecordMethodChannelPlatformInterface {
     );
 
     return outputPath;
+  }
+
+  @override
+  Future<Map<String, dynamic>?> stopDual(String recorderId) async {
+    final result = await _methodChannel.invokeMethod(
+      'stopDual',
+      {'recorderId': recorderId},
+    );
+
+    if (result is Map) {
+      return Map<String, dynamic>.from(result as Map);
+    }
+    return null;
   }
 
   @override
@@ -150,10 +180,7 @@ mixin RecordMethodChannel implements RecordMethodChannelPlatformInterface {
       {'recorderId': recorderId},
     );
 
-    return devices
-            ?.map((d) => InputDevice.fromMap(d as Map))
-            .toList(growable: false) ??
-        [];
+    return devices?.map((d) => InputDevice.fromMap(d as Map)).toList(growable: false) ?? [];
   }
 
   @override

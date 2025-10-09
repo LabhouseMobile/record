@@ -69,6 +69,44 @@ class Recorder {
     updateState(RecordState.record)
   }
 
+  func startStreamDual(config: RecordConfig, basePath: String) throws {
+    stop(completionHandler: {(path) -> () in })
+
+    if config.encoder != AudioEncoder.pcm16bits.rawValue {
+      // We stream PCM; encoder for m4a is internal to dual delegate
+    }
+
+    let delegate = RecorderDualDelegate(
+      basePath: basePath,
+      manageAudioSession: manageAudioSession,
+      onPause: {() -> () in self.updateState(RecordState.pause)},
+      onStop: {() -> () in self.updateState(RecordState.stop)}
+    )
+
+    try delegate.start(config: config, recordEventHandler: m_recordEventHandler)
+
+    self.delegate = delegate
+
+    updateState(RecordState.record)
+  }
+
+  func stopDual(completionHandler: @escaping (_ map: [String: Any?]) -> ()) {
+    if let d = delegate as? RecorderDualDelegate {
+      d.stopDual { m4aPath, wavPath, m4aError, wavError in
+        completionHandler([
+          "m4aPath": m4aPath,
+          "wavPath": wavPath,
+          "m4aError": m4aError,
+          "wavError": wavError
+        ])
+      }
+    } else {
+      stop { path in
+        completionHandler(["m4aPath": path, "wavPath": nil, "m4aError": nil, "wavError": nil])
+      }
+    }
+  }
+
   func stop(completionHandler: @escaping (_ path: String?) -> ()) {
     if isRecording() {
       delegate?.stop(completionHandler: {(path) -> () in

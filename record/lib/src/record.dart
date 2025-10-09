@@ -76,6 +76,41 @@ class AudioRecorder {
     return _recordStreamCtrl!.stream;
   }
 
+  /// Starts dual-output recording:
+  /// - Streams PCM S16LE frames
+  /// - Writes `${basePath}.m4a` and `${basePath}.wav` natively (Android/iOS only)
+  Future<Stream<Uint8List>> startStreamDual(
+    RecordConfig config, {
+    required String basePath,
+  }) async {
+    final stream = await _safeCall(
+      () async {
+        await _stopRecordStream();
+
+        return _platform.startStreamDual(
+          _recorderId,
+          config,
+          basePath: basePath,
+        );
+      },
+    );
+
+    _recordStreamCtrl = StreamController.broadcast();
+
+    _recordStreamSubscription = stream.listen(
+      (data) {
+        final streamCtrl = _recordStreamCtrl;
+        if (streamCtrl == null || streamCtrl.isClosed) return;
+
+        streamCtrl.add(data);
+      },
+    );
+
+    _startAmplitudeTimer();
+
+    return _recordStreamCtrl!.stream;
+  }
+
   /// Stops recording session and release internal recorder resource.
   ///
   /// Returns the output path if any.
@@ -88,6 +123,24 @@ class AudioRecorder {
       await _stopRecordStream();
 
       return path;
+    });
+  }
+
+  /// Stops dual-output recording and returns both paths with per-branch errors.
+  Future<DualOutputResult> stopDual() async {
+    return _safeCall(() async {
+      _amplitudeTimer?.cancel();
+
+      final result = await _platform.stopDual(_recorderId);
+
+      await _stopRecordStream();
+
+      return DualOutputResult(
+        m4aPath: result?['m4aPath'] as String?,
+        wavPath: result?['wavPath'] as String?,
+        m4aError: result?['m4aError'] as String?,
+        wavError: result?['wavError'] as String?,
+      );
     });
   }
 
@@ -275,6 +328,20 @@ class AudioRecorder {
       _semaphore.release();
     }
   }
+}
+
+class DualOutputResult {
+  final String? wavPath;
+  final String? m4aPath;
+  final String? wavError;
+  final String? m4aError;
+
+  const DualOutputResult({
+    this.wavPath,
+    this.m4aPath,
+    this.wavError,
+    this.m4aError,
+  });
 }
 
 /// A class that represents a semaphore.

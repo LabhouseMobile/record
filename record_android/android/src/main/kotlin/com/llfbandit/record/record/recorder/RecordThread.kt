@@ -20,12 +20,24 @@ import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicBoolean
 
 
+import android.media.MediaCodec
+import android.media.MediaFormat
+import java.nio.ByteBuffer
+import com.llfbandit.record.record.container.IContainerWriter
+import com.llfbandit.record.record.container.WaveContainer
+
 class RecordThread(
   private val config: RecordConfig,
-  private val recorderListener: OnAudioRecordListener
+  private val recorderListener: OnAudioRecordListener,
+  private val emitPcmToListener: Boolean = false,
+  private val wavPath: String? = null,
 ) : EncoderListener {
   private var mPcmReader: PCMReader? = null
   private var mEncoder: IEncoder? = null
+  private var mWavContainer: IContainerWriter? = null
+  private val mWavBufferInfo = MediaCodec.BufferInfo()
+  private var mAacErrorMessage: String? = null
+  private var mWavErrorMessage: String? = null
 
   // Signals whether a recording is in progress (true) or not (false).
   private val mIsRecording = AtomicBoolean(false)
@@ -38,6 +50,7 @@ class RecordThread(
   private val mExecutorService = Executors.newSingleThreadExecutor()
 
   override fun onEncoderFailure(ex: Exception) {
+    mAacErrorMessage = ex.message
     recorderListener.onFailure(ex)
   }
 
@@ -98,6 +111,25 @@ class RecordThread(
         mEncoder = encoder
         mEncoder!!.startEncoding()
 
+        // Initialize WAV writer branch if requested
+        if (wavPath != null) {
+          try {
+            val bitsPerSample = 16
+            val frameSize = config.numChannels * bitsPerSample / 8
+            val pcmFormat = MediaFormat().apply {
+              setInteger(MediaFormat.KEY_SAMPLE_RATE, config.sampleRate)
+              setInteger(MediaFormat.KEY_CHANNEL_COUNT, config.numChannels)
+              setInteger(Format.KEY_X_FRAME_SIZE_IN_BYTES, frameSize)
+            }
+            mWavContainer = WaveContainer(wavPath, frameSize)
+            mWavContainer!!.addTrack(pcmFormat)
+            mWavContainer!!.start()
+          } catch (ex: Exception) {
+            mWavErrorMessage = ex.message
+            mWavContainer = null
+          }
+        }
+
         recordState()
 
         startLatch.countDown()
@@ -109,7 +141,23 @@ class RecordThread(
           } else {
             val buffer = mPcmReader!!.read()
             if (buffer.isNotEmpty()) {
-              mEncoder!!.encode(buffer)
+              if (emitPcmToListener) {
+                recorderListener.onAudioChunk(buffer)
+              }
+              mEncoder?.encode(buffer)
+
+              // Write to WAV if available
+              val container = mWavContainer
+              if (container != null && mWavErrorMessage == null) {
+                try {
+                  val byteBuffer = ByteBuffer.wrap(buffer)
+                  mWavBufferInfo.offset = 0
+                  mWavBufferInfo.size = buffer.size
+                  container.writeSampleData(0, byteBuffer, mWavBufferInfo)
+                } catch (ex: Exception) {
+                  mWavErrorMessage = ex.message
+                }
+              }
             }
           }
         }
@@ -132,6 +180,12 @@ class RecordThread(
 
       mEncoder?.stopEncoding()
       mEncoder = null
+
+      try {
+        mWavContainer?.stop()
+      } catch (_: Exception) {}
+      mWavContainer?.release()
+      mWavContainer = null
 
       if (mHasBeenCanceled) {
         Utils.deleteFile(config.path)
@@ -170,4 +224,9 @@ class RecordThread(
 
     recorderListener.onRecord()
   }
+
+  // Dual result getters
+  fun getDualWavPath(): String? = wavPath
+  fun getDualM4aError(): String? = mAacErrorMessage
+  fun getDualWavError(): String? = mWavErrorMessage
 }

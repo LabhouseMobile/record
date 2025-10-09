@@ -8,6 +8,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import io.flutter.plugin.common.MethodChannel
+import java.util.HashMap
 import com.llfbandit.record.record.AudioInterruption
 import com.llfbandit.record.record.RecordConfig
 import com.llfbandit.record.record.RecordState
@@ -63,6 +65,10 @@ class AudioRecorder(
   private var afChangeListener: AudioManager.OnAudioFocusChangeListener? = null
   private var afRequest: AudioFocusRequest? = null
 
+  // Dual-output state
+  private var dualBasePath: String? = null
+  private var dualEnabled = false
+
   init {
     saveAudioManagerSettings()
   }
@@ -74,7 +80,9 @@ class AudioRecorder(
   override fun start(config: RecordConfig) {
     this.config = config
 
-    recorderThread = RecordThread(config, this)
+    val wavPath = if (dualEnabled) dualBasePath?.plus(".wav") else null
+    val emitPcm = !config.useLegacy
+    recorderThread = RecordThread(config, this, emitPcmToListener = emitPcm, wavPath = wavPath)
     recorderThread!!.startRecording()
 
     assignAudioManagerSettings(config)
@@ -164,6 +172,34 @@ class AudioRecorder(
 
   override fun onAudioChunk(chunk: ByteArray) {
     recorderRecordStreamHandler.sendRecordChunkEvent(chunk)
+  }
+
+  fun enableDualMode(basePath: String) {
+    this.dualBasePath = basePath
+    this.dualEnabled = true
+  }
+
+  fun stopDual(result: MethodChannel.Result) {
+    try {
+      if (recorderThread == null) {
+        result.success(null)
+        return
+      }
+      // Stop as usual, but gather dual info afterwards
+      stop { path ->
+        val map: MutableMap<String, Any?> = HashMap()
+        map["m4aPath"] = path
+        map["wavPath"] = dualBasePath?.plus(".wav")
+        map["m4aError"] = recorderThread?.getDualM4aError()
+        map["wavError"] = recorderThread?.getDualWavError()
+        result.success(map)
+      }
+    } catch (e: Exception) {
+      result.error("record", e.message, e.cause)
+    } finally {
+      dualEnabled = false
+      dualBasePath = null
+    }
   }
 
   // Save initial audio manager settings

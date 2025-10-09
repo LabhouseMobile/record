@@ -55,6 +55,17 @@ class RecorderWrapper(
     startRecording(config, result)
   }
 
+  fun startRecordingToDual(config: RecordConfig, basePath: String, result: MethodChannel.Result) {
+    if (config.useLegacy) {
+      throw Exception("Cannot stream audio while using the legacy recorder")
+    }
+    if (recorder is AudioRecorder) {
+      (recorder as AudioRecorder).enableDualMode(basePath)
+    }
+    // Configure for dual output: path is basePath.m4a; WAV handled natively
+    startRecording(config, result)
+  }
+
   fun dispose() {
     try {
       recorder?.dispose()
@@ -116,6 +127,28 @@ class RecorderWrapper(
         result.success(null)
       } else {
         recorder?.stop(fun(path) = result.success(path))
+      }
+    } catch (e: Exception) {
+      result.error("record", e.message, e.cause)
+    } finally {
+      stopService()
+    }
+  }
+
+  fun stopDual(result: MethodChannel.Result) {
+    try {
+      if (recorder == null) {
+        result.success(null)
+      } else if (recorder is AudioRecorder) {
+        (recorder as AudioRecorder).stopDual(result)
+      } else {
+        // Fallback to standard stop
+        recorder?.stop(fun(path) = result.success(mapOf(
+          "m4aPath" to path,
+          "wavPath" to null,
+          "m4aError" to null,
+          "wavError" to null
+        )))
       }
     } catch (e: Exception) {
       result.error("record", e.message, e.cause)

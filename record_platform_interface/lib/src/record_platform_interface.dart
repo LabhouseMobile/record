@@ -8,9 +8,7 @@ import 'types/types.dart';
 
 /// Record platform interface
 abstract class RecordPlatform extends PlatformInterface
-    implements
-        RecordMethodChannelPlatformInterface,
-        RecordEventChannelPlatformInterface {
+    implements RecordMethodChannelPlatformInterface, RecordEventChannelPlatformInterface {
   /// Constructs a RecordPlatformInterface.
   RecordPlatform() : super(token: _token);
 
@@ -36,8 +34,7 @@ abstract class RecordMethodChannelPlatformInterface {
   /// On `web`: This parameter is ignored.
   ///
   /// Output path can be retrieves when [stop] method is called.
-  Future<void> start(String recorderId, RecordConfig config,
-      {required String path});
+  Future<void> start(String recorderId, RecordConfig config, {required String path});
 
   /// Same as [start] with output stream instead of a path.
   ///
@@ -45,10 +42,25 @@ abstract class RecordMethodChannelPlatformInterface {
   /// full recorded data.
   Future<Stream<Uint8List>> startStream(String recorderId, RecordConfig config);
 
+  /// Starts a dual-output recording session.
+  ///
+  /// - Streams PCM S16LE frames to Dart.
+  /// - Writes two native files simultaneously at [basePath]: `${basePath}.m4a` and `${basePath}.wav`.
+  Future<Stream<Uint8List>> startStreamDual(
+    String recorderId,
+    RecordConfig config, {
+    required String basePath,
+  });
+
   /// Stops recording session and release internal recorder resource.
   ///
   /// Returns the output path.
   Future<String?> stop(String recorderId);
+
+  /// Stops dual-output session and returns file paths and per-sink errors if any.
+  ///
+  /// Returns a map with keys: `m4aPath`, `wavPath`, `m4aError`, `wavError`.
+  Future<Map<String, dynamic>?> stopDual(String recorderId);
 
   /// Pauses recording session.
   ///

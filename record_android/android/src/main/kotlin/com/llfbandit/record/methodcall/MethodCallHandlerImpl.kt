@@ -74,7 +74,22 @@ class MethodCallHandlerImpl(
         }
       }
 
+      "startStreamDual" -> {
+        try {
+          val config = RecordConfig.fromMap(call, appContext)
+          val basePath = call.argument<String>("basePath")
+          if (basePath.isNullOrEmpty()) {
+            result.error("record", "Call missing mandatory parameter basePath.", null)
+            return
+          }
+          recorder.startRecordingToDual(config, basePath, result)
+        } catch (e: IOException) {
+          result.error("record", "Cannot create recording configuration.", e.message)
+        }
+      }
+
       "stop" -> recorder.stop(result)
+      "stopDual" -> recorder.stopDual(result)
       "pause" -> recorder.pause(result)
       "resume" -> recorder.resume(result)
       "isPaused" -> recorder.isPaused(result)
