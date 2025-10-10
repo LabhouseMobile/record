@@ -5,8 +5,12 @@ extension AVAudioPCMBuffer {
   func toCMSampleBuffer(presentationTime: CMTime) -> CMSampleBuffer? {
     var asbd = format.streamDescription.pointee
     
-    // Debug: print format details
-    print("🔵 toCMSampleBuffer: format=\(asbd.mSampleRate)Hz, \(asbd.mChannelsPerFrame)ch, bytesPerFrame=\(asbd.mBytesPerFrame), interleaved=\(format.isInterleaved)")
+    // Debug: print format details (only occasionally to avoid spam)
+    let shouldPrint = Int.random(in: 0..<100) == 0
+    if shouldPrint {
+      print("🔵 toCMSampleBuffer: format=\(asbd.mSampleRate)Hz, \(asbd.mChannelsPerFrame)ch, bytesPerFrame=\(asbd.mBytesPerFrame), interleaved=\(format.isInterleaved)")
+      print("🔵 toCMSampleBuffer: frameLength=\(frameLength), presentationTime=\(presentationTime.value)/\(presentationTime.timescale)")
+    }
 
     var formatDesc: CMAudioFormatDescription?
     let statusFmt = CMAudioFormatDescriptionCreate(allocator: kCFAllocatorDefault,
@@ -74,9 +78,14 @@ extension AVAudioPCMBuffer {
       }
     }
 
-    var timing = CMSampleTimingInfo(duration: CMTime(value: Int64(frameLength), timescale: CMTimeScale(format.sampleRate)),
+    let duration = CMTime(value: Int64(frameLength), timescale: CMTimeScale(format.sampleRate))
+    var timing = CMSampleTimingInfo(duration: duration,
                                     presentationTimeStamp: presentationTime,
                                     decodeTimeStamp: .invalid)
+    
+    if shouldPrint {
+      print("🔵 toCMSampleBuffer: duration=\(CMTimeGetSeconds(duration))s, pts=\(CMTimeGetSeconds(presentationTime))s")
+    }
 
     var sampleBuffer: CMSampleBuffer?
     let statusSB = CMSampleBufferCreateReady(allocator: kCFAllocatorDefault,

@@ -2,6 +2,7 @@ import AVFoundation
 import CoreMedia
 import Foundation
 import Flutter
+import os.log
 
 class RecorderDualDelegate: NSObject, AudioRecordingStreamDelegate {
   var config: RecordConfig?
@@ -30,21 +31,21 @@ class RecorderDualDelegate: NSObject, AudioRecordingStreamDelegate {
   }
 
   func start(config: RecordConfig, recordEventHandler: RecordStreamHandler) throws {
-    print("🔵 RecorderDualDelegate.start: config=\(config.sampleRate)Hz, \(config.numChannels)ch")
+    os_log("🔵 RecorderDualDelegate.start: config=%dHz, %dch", log: .default, type: .info, config.sampleRate, config.numChannels)
     let audioEngine = AVAudioEngine()
 
     try initAVAudioSession(config: config, manageAudioSession: manageAudioSession)
     try setVoiceProcessing(echoCancel: config.echoCancel, autoGain: config.autoGain, audioEngine: audioEngine)
 
     let srcFormat = audioEngine.inputNode.inputFormat(forBus: 0)
-    print("🔵 RecorderDualDelegate.start: srcFormat=\(srcFormat.sampleRate)Hz, \(srcFormat.channelCount)ch")
+    os_log("🔵 srcFormat=%fHz, %dch", log: .default, type: .info, srcFormat.sampleRate, srcFormat.channelCount)
 
     // Interleaved PCM for WAV, streaming, and M4A
     guard let pcmFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: Double(config.sampleRate), channels: AVAudioChannelCount(config.numChannels), interleaved: true) else {
       throw RecorderError.error(message: "Failed to start recording", details: "Unsupported PCM format")
     }
     
-    print("🔵 RecorderDualDelegate.start: pcmFormat=\(pcmFormat.sampleRate)Hz, \(pcmFormat.channelCount)ch, interleaved=\(pcmFormat.isInterleaved)")
+    os_log("🔵 pcmFormat=%fHz, %dch, interleaved=%d", log: .default, type: .info, pcmFormat.sampleRate, pcmFormat.channelCount, pcmFormat.isInterleaved)
     
     // Store format for M4A encoding
     self.pcmFormat = pcmFormat
@@ -78,20 +79,36 @@ class RecorderDualDelegate: NSObject, AudioRecordingStreamDelegate {
       let url = URL(fileURLWithPath: m4aFilePath)
       let writer = try AVAssetWriter(outputURL: url, fileType: .m4a)
       
-      // AAC settings - let AVAssetWriter choose appropriate bitrate
-      // For 16kHz mono, a bitrate around 24-32kbps is appropriate
+      // AAC settings
+      // Note: We must explicitly specify the encoder settings to match our PCM input
+      // Without bitrate, the encoder may make incorrect assumptions
+      let bitRate = config.sampleRate * config.numChannels  // ~16kbps for 16kHz mono
       let settings: [String: Any] = [
         AVFormatIDKey: kAudioFormatMPEG4AAC,
         AVSampleRateKey: config.sampleRate,
-        AVNumberOfChannelsKey: config.numChannels
-        // Don't specify bitRate - let the encoder choose based on sample rate/channels
+        AVNumberOfChannelsKey: config.numChannels,
+        AVEncoderBitRateKey: bitRate
       ]
       
-      let input = AVAssetWriterInput(mediaType: .audio, outputSettings: settings)
+      print("🔵 RecorderDualDelegate.start: M4A settings - sampleRate=\(config.sampleRate), channels=\(config.numChannels), bitRate=\(bitRate)")
+      
+      // Create source format hint from pcmFormat
+      // This tells the encoder the exact format of incoming PCM data
+      guard let sourceFormatDesc = pcmFormat.formatDescription as? CMAudioFormatDescription else {
+        throw RecorderError.error(message: "Failed to get PCM format description", details: "Cannot create format description from AVAudioFormat")
+      }
+      
+      print("🔵 RecorderDualDelegate.start: Source format description created")
+      if let sourceAsbd = CMAudioFormatDescriptionGetStreamBasicDescription(sourceFormatDesc) {
+        print("  ASBD: \(sourceAsbd.pointee.mSampleRate)Hz, \(sourceAsbd.pointee.mChannelsPerFrame)ch, \(sourceAsbd.pointee.mBytesPerFrame) bytes/frame")
+      }
+      
+      // Initialize AVAssetWriterInput with sourceFormatHint
+      let input = AVAssetWriterInput(mediaType: .audio, outputSettings: settings, sourceFormatHint: sourceFormatDesc)
       input.expectsMediaDataInRealTime = true
       
-      print("🔵 RecorderDualDelegate.start: M4A input created with settings: \(settings)")
-      print("🔵 RecorderDualDelegate.start: M4A input sourceFormatHint: \(String(describing: input.sourceFormatHint))")
+      print("🔵 RecorderDualDelegate.start: M4A input created")
+      print("🔵 RecorderDualDelegate.start: Input sourceFormatHint set: \(String(describing: input.sourceFormatHint))")
       
       guard writer.canAdd(input) else {
         throw RecorderError.error(message: "Cannot add input to M4A writer", details: "Writer rejected input")
@@ -131,14 +148,24 @@ class RecorderDualDelegate: NSObject, AudioRecordingStreamDelegate {
         return buffer
       }
       // Calculate proper output capacity based on sample rate conversion
-      let capacity = (UInt32(pcmFormat.sampleRate) * pcmFormat.channelCount * buffer.frameLength) / (UInt32(buffer.format.sampleRate) * buffer.format.channelCount)
+      // frameLength is already in frames, so we only need the sample rate ratio
+      let capacity = (UInt32(pcmFormat.sampleRate) * buffer.frameLength) / UInt32(buffer.format.sampleRate)
       guard let convertedBuffer = AVAudioPCMBuffer(pcmFormat: pcmFormat, frameCapacity: capacity) else {
         print("🔴 RecorderDualDelegate.tap: failed to create converted buffer")
         return
       }
       var error: NSError? = nil
-      pcmConverter.convert(to: convertedBuffer, error: &error, withInputFrom: inputCallback)
-      if error != nil { return }
+      let inputStatus = pcmConverter.convert(to: convertedBuffer, error: &error, withInputFrom: inputCallback)
+      if error != nil {
+        print("🔴 RecorderDualDelegate.tap: conversion error: \(error!)")
+        return
+      }
+      
+      if self.currentFramePosition == 0 {
+        os_log("🟢 FIRST BUFFER - Input: %d frames at %fHz", log: .default, type: .info, buffer.frameLength, buffer.format.sampleRate)
+        os_log("🟢 FIRST BUFFER - Output: %d frames at %fHz", log: .default, type: .info, convertedBuffer.frameLength, pcmFormat.sampleRate)
+        os_log("🟢 FIRST BUFFER - Capacity: %d, actual: %d", log: .default, type: .info, capacity, convertedBuffer.frameLength)
+      }
 
       // Calculate actual byte count from converted frames
       let actualByteCount = Int(convertedBuffer.frameLength) * Int(pcmFormat.streamDescription.pointee.mBytesPerFrame)
@@ -183,8 +210,15 @@ class RecorderDualDelegate: NSObject, AudioRecordingStreamDelegate {
       // Write M4A - use interleaved PCM directly
       if let input = self.m4aInput, let writer = self.m4aWriter, self.m4aError == nil {
         if input.isReadyForMoreMediaData {
+          // CRITICAL: Use the actual PCM sample rate for the timescale, not the source format
           let pts = CMTimeMake(value: self.currentFramePosition, timescale: Int32(pcmFormat.sampleRate))
           if let sb = convertedBuffer.toCMSampleBuffer(presentationTime: pts) {
+            if self.currentFramePosition == 0 {
+              print("🟢 RecorderDualDelegate.tap: First M4A sample buffer")
+              print("  pts: \(pts.value)/\(pts.timescale) = \(CMTimeGetSeconds(pts))s")
+              print("  frameLength: \(convertedBuffer.frameLength)")
+              print("  duration: \(CMTimeGetSeconds(CMSampleBufferGetDuration(sb)))s")
+            }
             let success = input.append(sb)
             if !success {
               self.m4aError = "Failed to append sample buffer"
@@ -207,7 +241,7 @@ class RecorderDualDelegate: NSObject, AudioRecordingStreamDelegate {
         }
       }
 
-      // Advance frame position for timestamps
+      // Advance frame position for timestamps (in PCM sample rate units)
       self.currentFramePosition += Int64(convertedBuffer.frameLength)
     }
 
@@ -224,6 +258,11 @@ class RecorderDualDelegate: NSObject, AudioRecordingStreamDelegate {
     audioEngine?.inputNode.removeTap(onBus: bus)
     audioEngine?.stop()
     audioEngine = nil
+
+    let totalFrames = self.currentFramePosition
+    let pcmSampleRate = self.pcmFormat?.sampleRate ?? 0
+    let expectedDuration = Double(totalFrames) / pcmSampleRate
+    os_log("🟢 STOP: Recorded %lld frames at %fHz = %f seconds", log: .default, type: .info, totalFrames, pcmSampleRate, expectedDuration)
 
     var m4aPath: String? = nil
     if let writer = m4aWriter, let input = m4aInput {
