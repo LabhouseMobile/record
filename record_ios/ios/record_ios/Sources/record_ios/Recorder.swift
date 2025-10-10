@@ -73,7 +73,10 @@ class Recorder {
     stop(completionHandler: {(path) -> () in })
 
     if config.encoder != AudioEncoder.pcm16bits.rawValue {
-      // We stream PCM; encoder for m4a is internal to dual delegate
+      throw RecorderError.error(
+        message: "Failed to start recording",
+        details: "\(config.encoder) not supported in dual streaming mode. Use pcm16bits encoder."
+      )
     }
 
     let delegate = RecorderDualDelegate(

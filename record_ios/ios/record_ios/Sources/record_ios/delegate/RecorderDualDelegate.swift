@@ -154,10 +154,17 @@ class RecorderDualDelegate: NSObject, AudioRecordingStreamDelegate {
 
       // Stream PCM (interleaved)
       if let eventSink = recordEventHandler.eventSink {
-        let buffer = convertedBuffer.audioBufferList.pointee.mBuffers
-        if let mData = buffer.mData {
-          let data = Data(bytes: mData, count: actualByteCount)
-          DispatchQueue.main.async { eventSink(FlutterStandardTypedData(bytes: data)) }
+        if let channelData = convertedBuffer.int16ChannelData {
+          let channelDataPointer = channelData.pointee
+          let samples = stride(from: 0,
+                               to: Int(convertedBuffer.frameLength),
+                               by: convertedBuffer.stride).map{ channelDataPointer[$0] }
+          
+          let bytes = Data(self.convertInt16toUInt8(samples))
+          
+          DispatchQueue.main.async {
+            eventSink(FlutterStandardTypedData(bytes: bytes))
+          }
         }
       }
 
@@ -270,6 +277,17 @@ class RecorderDualDelegate: NSObject, AudioRecordingStreamDelegate {
     }
     
     amplitude = 20 * (log(maxSample / 32767.0) / log(10))
+  }
+  
+  private func convertInt16toUInt8(_ samples: [Int16]) -> [UInt8] {
+    var bytes: [UInt8] = []
+    
+    for sample in samples {
+      bytes.append(UInt8(sample & 0x00ff))
+      bytes.append(UInt8(sample >> 8 & 0x00ff))
+    }
+    
+    return bytes
   }
   
   // Reuse voice processing toggles from stream delegate
