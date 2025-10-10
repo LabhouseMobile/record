@@ -23,8 +23,12 @@ class WaveContainer(path: String, private val frameSize: Int) : IContainerWriter
 
     Os.ftruncate(file.fd, 0)
 
-    // Skip header
-    Os.lseek(file.fd, HEADER_SIZE.toLong(), OsConstants.SEEK_SET)
+    // Write a valid header with maximum size for crash recovery
+    // If the app crashes, the file will still be readable up to the data written
+    // Audio players stop at EOF even if header indicates larger size
+    val maxFileSize = 0x7FFFFFFFL + HEADER_SIZE // ~2GB max for standard WAV
+    val initialHeader = buildHeader(maxFileSize)
+    Os.write(file.fd, initialHeader)
 
     isStarted = true
   }
@@ -37,6 +41,7 @@ class WaveContainer(path: String, private val frameSize: Int) : IContainerWriter
     isStarted = false
 
     if (track >= 0) {
+      // Update header with actual file size
       val fileSize = Os.lseek(file.fd, 0, OsConstants.SEEK_CUR)
       val header = buildHeader(fileSize)
       Os.lseek(file.fd, 0, OsConstants.SEEK_SET)

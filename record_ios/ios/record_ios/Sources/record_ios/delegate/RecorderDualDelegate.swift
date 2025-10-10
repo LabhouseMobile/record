@@ -392,8 +392,12 @@ class WavFileWriter {
   }
 
   private func writeHeaderPlaceholder() throws {
-    let empty = Data(count: 44)
-    try fh.write(contentsOf: empty)
+    // Write a valid header with maximum size for crash recovery
+    // If the app crashes, the file will still be readable up to the data written
+    // Audio players stop at EOF even if header indicates larger size
+    let maxDataSize = 0x7FFFFFFF // ~2GB max for standard WAV
+    let header = buildHeader(fileSize: 44 + maxDataSize)
+    try fh.write(contentsOf: header)
   }
 
   private func buildHeader(fileSize: Int) -> Data {
