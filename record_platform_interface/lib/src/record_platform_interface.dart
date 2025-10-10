@@ -59,8 +59,8 @@ abstract class RecordMethodChannelPlatformInterface {
 
   /// Stops dual-output session and returns file paths and per-sink errors if any.
   ///
-  /// Returns a map with keys: `m4aPath`, `wavPath`, `m4aError`, `wavError`.
-  Future<Map<String, dynamic>?> stopDual(String recorderId);
+  /// Returns [MultiOutputResult] with paths and errors for each output.
+  Future<MultiOutputResult> stopDual(String recorderId);
 
   /// Pauses recording session.
   ///

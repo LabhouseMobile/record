@@ -134,12 +134,14 @@ class RecordLinux extends RecordPlatform {
     });
   }
 
+  @override
   Future<Stream<Uint8List>> startStreamDual(
     String recorderId,
     RecordConfig config, {
     required String basePath,
   }) {
-    throw UnimplementedError();
+    throw UnsupportedError('Dual-output recording is not supported on Linux. '
+        'Use startStream() for PCM streaming or start() for file recording.');
   }
 
   @override
@@ -172,8 +174,9 @@ class RecordLinux extends RecordPlatform {
     return path;
   }
 
-  Future<Map<String, dynamic>?> stopDual(String recorderId) {
-    throw UnimplementedError();
+  @override
+  Future<MultiOutputResult> stopDual(String recorderId) {
+    throw UnsupportedError('Dual-output recording is not supported on Linux.');
   }
 
   @override

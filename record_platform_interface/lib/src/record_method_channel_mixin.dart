@@ -100,7 +100,7 @@ mixin RecordMethodChannel implements RecordMethodChannelPlatformInterface {
 
     await _methodChannel.invokeMethod('startStreamDual', {
       'recorderId': recorderId,
-      'path': basePath + '.m4a',
+      'path': '$basePath.m4a',
       'basePath': basePath,
       ...config.toMap(),
     });
@@ -119,16 +119,13 @@ mixin RecordMethodChannel implements RecordMethodChannelPlatformInterface {
   }
 
   @override
-  Future<Map<String, dynamic>?> stopDual(String recorderId) async {
+  Future<MultiOutputResult> stopDual(String recorderId) async {
     final result = await _methodChannel.invokeMethod(
       'stopDual',
       {'recorderId': recorderId},
     );
 
-    if (result is Map) {
-      return Map<String, dynamic>.from(result as Map);
-    }
-    return null;
+    return MultiOutputResult.fromMap(result as Map<dynamic, dynamic>?);
   }
 
   @override

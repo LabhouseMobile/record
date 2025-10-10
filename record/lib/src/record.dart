@@ -127,7 +127,7 @@ class AudioRecorder {
   }
 
   /// Stops dual-output recording and returns both paths with per-branch errors.
-  Future<DualOutputResult> stopDual() async {
+  Future<MultiOutputResult> stopDual() async {
     return _safeCall(() async {
       _amplitudeTimer?.cancel();
 
@@ -135,12 +135,7 @@ class AudioRecorder {
 
       await _stopRecordStream();
 
-      return DualOutputResult(
-        m4aPath: result?['m4aPath'] as String?,
-        wavPath: result?['wavPath'] as String?,
-        m4aError: result?['m4aError'] as String?,
-        wavError: result?['wavError'] as String?,
-      );
+      return result;
     });
   }
 
@@ -330,19 +325,9 @@ class AudioRecorder {
   }
 }
 
-class DualOutputResult {
-  final String? wavPath;
-  final String? m4aPath;
-  final String? wavError;
-  final String? m4aError;
-
-  const DualOutputResult({
-    this.wavPath,
-    this.m4aPath,
-    this.wavError,
-    this.m4aError,
-  });
-}
+// Re-export MultiOutputResult for backward compatibility
+@Deprecated('Use MultiOutputResult from record_platform_interface instead')
+typedef DualOutputResult = MultiOutputResult;
 
 /// A class that represents a semaphore.
 class _Semaphore {

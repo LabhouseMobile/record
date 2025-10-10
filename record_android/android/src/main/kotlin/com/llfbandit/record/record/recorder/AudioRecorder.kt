@@ -8,11 +8,10 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import io.flutter.plugin.common.MethodChannel
-import java.util.HashMap
 import com.llfbandit.record.record.AudioInterruption
 import com.llfbandit.record.record.RecordConfig
 import com.llfbandit.record.record.RecordState
+import com.llfbandit.record.record.output.AudioOutputWriter
 import com.llfbandit.record.record.stream.RecorderRecordStreamHandler
 import com.llfbandit.record.record.stream.RecorderStateStreamHandler
 
@@ -65,10 +64,6 @@ class AudioRecorder(
   private var afChangeListener: AudioManager.OnAudioFocusChangeListener? = null
   private var afRequest: AudioFocusRequest? = null
 
-  // Dual-output state
-  private var dualBasePath: String? = null
-  private var dualEnabled = false
-
   init {
     saveAudioManagerSettings()
   }
@@ -78,11 +73,24 @@ class AudioRecorder(
    */
   @Throws(Exception::class)
   override fun start(config: RecordConfig) {
+    startWithOutputs(config, emptyList())
+  }
+
+  /**
+   * Starts the recording with the given config and output writers.
+   * This allows recording to multiple output destinations simultaneously.
+   */
+  @Throws(Exception::class)
+  fun startWithOutputs(config: RecordConfig, outputWriters: List<AudioOutputWriter>) {
     this.config = config
 
-    val wavPath = if (dualEnabled) dualBasePath?.plus(".wav") else null
     val emitPcm = !config.useLegacy
-    recorderThread = RecordThread(config, this, emitPcmToListener = emitPcm, wavPath = wavPath)
+    recorderThread = RecordThread(
+      config = config,
+      recorderListener = this,
+      outputWriters = outputWriters,
+      emitPcmToListener = emitPcm
+    )
     recorderThread!!.startRecording()
 
     assignAudioManagerSettings(config)
@@ -174,32 +182,12 @@ class AudioRecorder(
     recorderRecordStreamHandler.sendRecordChunkEvent(chunk)
   }
 
-  fun enableDualMode(basePath: String) {
-    this.dualBasePath = basePath
-    this.dualEnabled = true
-  }
-
-  fun stopDual(result: MethodChannel.Result) {
-    try {
-      if (recorderThread == null) {
-        result.success(null)
-        return
-      }
-      // Stop as usual, but gather dual info afterwards
-      stop { path ->
-        val map: MutableMap<String, Any?> = HashMap()
-        map["m4aPath"] = path
-        map["wavPath"] = dualBasePath?.plus(".wav")
-        map["m4aError"] = recorderThread?.getDualM4aError()
-        map["wavError"] = recorderThread?.getDualWavError()
-        result.success(map)
-      }
-    } catch (e: Exception) {
-      result.error("record", e.message, e.cause)
-    } finally {
-      dualEnabled = false
-      dualBasePath = null
-    }
+  /**
+   * Get the output results from all configured output writers.
+   * Returns a map of output path to error message (null if successful).
+   */
+  fun getOutputResults(): Map<String, String?> {
+    return recorderThread?.getOutputResults() ?: emptyMap()
   }
 
   // Save initial audio manager settings

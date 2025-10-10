@@ -5,7 +5,6 @@ import com.llfbandit.record.record.AudioEncoder
 import com.llfbandit.record.record.PCMReader
 import com.llfbandit.record.record.RecordConfig
 import com.llfbandit.record.record.encoder.EncoderListener
-import com.llfbandit.record.record.encoder.IEncoder
 import com.llfbandit.record.record.format.AacFormat
 import com.llfbandit.record.record.format.AmrNbFormat
 import com.llfbandit.record.record.format.AmrWbFormat
@@ -14,30 +13,19 @@ import com.llfbandit.record.record.format.Format
 import com.llfbandit.record.record.format.OpusFormat
 import com.llfbandit.record.record.format.PcmFormat
 import com.llfbandit.record.record.format.WaveFormat
+import com.llfbandit.record.record.output.AudioOutputWriter
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicBoolean
 
-
-import android.media.MediaCodec
-import android.media.MediaFormat
-import java.nio.ByteBuffer
-import com.llfbandit.record.record.container.IContainerWriter
-import com.llfbandit.record.record.container.WaveContainer
-
 class RecordThread(
   private val config: RecordConfig,
   private val recorderListener: OnAudioRecordListener,
+  private val outputWriters: List<AudioOutputWriter> = emptyList(),
   private val emitPcmToListener: Boolean = false,
-  private val wavPath: String? = null,
 ) : EncoderListener {
   private var mPcmReader: PCMReader? = null
-  private var mEncoder: IEncoder? = null
-  private var mWavContainer: IContainerWriter? = null
-  private val mWavBufferInfo = MediaCodec.BufferInfo()
-  private var mAacErrorMessage: String? = null
-  private var mWavErrorMessage: String? = null
 
   // Signals whether a recording is in progress (true) or not (false).
   private val mIsRecording = AtomicBoolean(false)
@@ -50,7 +38,6 @@ class RecordThread(
   private val mExecutorService = Executors.newSingleThreadExecutor()
 
   override fun onEncoderFailure(ex: Exception) {
-    mAacErrorMessage = ex.message
     recorderListener.onFailure(ex)
   }
 
@@ -59,11 +46,11 @@ class RecordThread(
   }
 
   fun isRecording(): Boolean {
-    return mEncoder != null && mIsRecording.get()
+    return mPcmReader != null && mIsRecording.get()
   }
 
   fun isPaused(): Boolean {
-    return mEncoder != null && mIsPaused.get()
+    return mPcmReader != null && mIsPaused.get()
   }
 
   fun pauseRecording() {
@@ -103,30 +90,17 @@ class RecordThread(
     mExecutorService.execute {
       try {
         val format = selectFormat()
-        val (encoder, adjustedFormat) = format.getEncoder(config, this)
+        val (_, adjustedFormat) = format.getEncoder(config, this)
 
         mPcmReader = PCMReader(config, adjustedFormat)
         mPcmReader!!.start()
 
-        mEncoder = encoder
-        mEncoder!!.startEncoding()
-
-        // Initialize WAV writer branch if requested
-        if (wavPath != null) {
+        // Initialize all output writers
+        outputWriters.forEach { writer ->
           try {
-            val bitsPerSample = 16
-            val frameSize = config.numChannels * bitsPerSample / 8
-            val pcmFormat = MediaFormat().apply {
-              setInteger(MediaFormat.KEY_SAMPLE_RATE, config.sampleRate)
-              setInteger(MediaFormat.KEY_CHANNEL_COUNT, config.numChannels)
-              setInteger(Format.KEY_X_FRAME_SIZE_IN_BYTES, frameSize)
-            }
-            mWavContainer = WaveContainer(wavPath, frameSize)
-            mWavContainer!!.addTrack(pcmFormat)
-            mWavContainer!!.start()
+            writer.start()
           } catch (ex: Exception) {
-            mWavErrorMessage = ex.message
-            mWavContainer = null
+            // Writer will handle its own error, continue with other writers
           }
         }
 
@@ -141,22 +115,14 @@ class RecordThread(
           } else {
             val buffer = mPcmReader!!.read()
             if (buffer.isNotEmpty()) {
+              // Emit PCM to Dart if requested
               if (emitPcmToListener) {
                 recorderListener.onAudioChunk(buffer)
               }
-              mEncoder?.encode(buffer)
 
-              // Write to WAV if available
-              val container = mWavContainer
-              if (container != null && mWavErrorMessage == null) {
-                try {
-                  val byteBuffer = ByteBuffer.wrap(buffer)
-                  mWavBufferInfo.offset = 0
-                  mWavBufferInfo.size = buffer.size
-                  container.writeSampleData(0, byteBuffer, mWavBufferInfo)
-                } catch (ex: Exception) {
-                  mWavErrorMessage = ex.message
-                }
+              // Write to all output writers
+              outputWriters.forEach { writer ->
+                writer.write(buffer)
               }
             }
           }
@@ -178,17 +144,30 @@ class RecordThread(
       mPcmReader?.release()
       mPcmReader = null
 
-      mEncoder?.stopEncoding()
-      mEncoder = null
+      // Stop and release all output writers
+      outputWriters.forEach { writer ->
+        try {
+          writer.stop()
+        } catch (_: Exception) {
+          // Ignore errors during stop
+        }
+      }
 
-      try {
-        mWavContainer?.stop()
-      } catch (_: Exception) {}
-      mWavContainer?.release()
-      mWavContainer = null
+      outputWriters.forEach { writer ->
+        try {
+          writer.release()
+        } catch (_: Exception) {
+          // Ignore errors during release
+        }
+      }
 
       if (mHasBeenCanceled) {
-        Utils.deleteFile(config.path)
+        // Delete all output files
+        outputWriters.forEach { writer ->
+          writer.getOutputPath()?.let { path ->
+            Utils.deleteFile(path)
+          }
+        }
       }
     } catch (ex: Exception) {
       recorderListener.onFailure(ex)
@@ -225,8 +204,14 @@ class RecordThread(
     recorderListener.onRecord()
   }
 
-  // Dual result getters
-  fun getDualWavPath(): String? = wavPath
-  fun getDualM4aError(): String? = mAacErrorMessage
-  fun getDualWavError(): String? = mWavErrorMessage
+  /**
+   * Get results from all output writers.
+   * Returns a map of output path to error message (null if successful).
+   */
+  fun getOutputResults(): Map<String, String?> {
+    return outputWriters.associate { writer ->
+      val path = writer.getOutputPath() ?: "unknown"
+      path to writer.getError()
+    }
+  }
 }

@@ -26,7 +26,8 @@ class WaveContainer(path: String, private val frameSize: Int) : IContainerWriter
     // Write a valid header with maximum size for crash recovery
     // If the app crashes, the file will still be readable up to the data written
     // Audio players stop at EOF even if header indicates larger size
-    val maxFileSize = 0x7FFFFFFFL + HEADER_SIZE // ~2GB max for standard WAV
+    // Use Int.MAX_VALUE to avoid overflow in buildHeader check
+    val maxFileSize = (Int.MAX_VALUE - 1).toLong()
     val initialHeader = buildHeader(maxFileSize)
     Os.write(file.fd, initialHeader)
 

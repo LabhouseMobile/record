@@ -71,8 +71,23 @@ class RecordPluginWebWrapper extends RecordPlatform {
   }
 
   @override
+  Future<Stream<Uint8List>> startStreamDual(
+    String recorderId,
+    RecordConfig config, {
+    required String basePath,
+  }) {
+    throw UnsupportedError('Dual-output recording is not supported on Linux. '
+        'Use startStream() for PCM streaming or start() for file recording.');
+  }
+
+  @override
   Future<String?> stop(String recorderId) {
     return _getRecorder(recorderId).stop();
+  }
+
+  @override
+  Future<MultiOutputResult> stopDual(String recorderId) {
+    throw UnsupportedError('Dual-output recording is not supported on Linux.');
   }
 
   @override
@@ -106,8 +121,7 @@ class RecordPluginWebWrapper extends RecordPlatform {
     if (recorder == null) {
       throw PlatformException(
         code: 'record',
-        message:
-            'Record has not yet been created or has already been disposed.',
+        message: 'Record has not yet been created or has already been disposed.',
       );
     }
 
