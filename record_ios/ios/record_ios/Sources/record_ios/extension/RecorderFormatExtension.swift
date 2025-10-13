@@ -4,13 +4,6 @@ import CoreMedia
 extension AVAudioPCMBuffer {
   func toCMSampleBuffer(presentationTime: CMTime) -> CMSampleBuffer? {
     var asbd = format.streamDescription.pointee
-    
-    // Debug: print format details (only occasionally to avoid spam)
-    let shouldPrint = Int.random(in: 0..<100) == 0
-    if shouldPrint {
-      print("🔵 toCMSampleBuffer: format=\(asbd.mSampleRate)Hz, \(asbd.mChannelsPerFrame)ch, bytesPerFrame=\(asbd.mBytesPerFrame), interleaved=\(format.isInterleaved)")
-      print("🔵 toCMSampleBuffer: frameLength=\(frameLength), presentationTime=\(presentationTime.value)/\(presentationTime.timescale)")
-    }
 
     var formatDesc: CMAudioFormatDescription?
     let statusFmt = CMAudioFormatDescriptionCreate(allocator: kCFAllocatorDefault,
@@ -22,10 +15,8 @@ extension AVAudioPCMBuffer {
                                                    extensions: nil,
                                                    formatDescriptionOut: &formatDesc)
     if statusFmt != noErr || formatDesc == nil {
-      print("🔴 toCMSampleBuffer: Failed to create format description, status=\(statusFmt)")
       return nil
     }
-    print("🔵 toCMSampleBuffer: Format description created successfully")
 
     // Calculate total data length for all channels
     // Same regardless of interleaved vs non-interleaved - only the layout differs
@@ -82,10 +73,6 @@ extension AVAudioPCMBuffer {
     var timing = CMSampleTimingInfo(duration: duration,
                                     presentationTimeStamp: presentationTime,
                                     decodeTimeStamp: .invalid)
-    
-    if shouldPrint {
-      print("🔵 toCMSampleBuffer: duration=\(CMTimeGetSeconds(duration))s, pts=\(CMTimeGetSeconds(presentationTime))s")
-    }
 
     var sampleBuffer: CMSampleBuffer?
     let statusSB = CMSampleBufferCreateReady(allocator: kCFAllocatorDefault,

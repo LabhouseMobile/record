@@ -325,10 +325,6 @@ class AudioRecorder {
   }
 }
 
-// Re-export MultiOutputResult for backward compatibility
-@Deprecated('Use MultiOutputResult from record_platform_interface instead')
-typedef DualOutputResult = MultiOutputResult;
-
 /// A class that represents a semaphore.
 class _Semaphore {
   final int maxCount = 1;

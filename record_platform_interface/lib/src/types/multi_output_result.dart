@@ -57,7 +57,7 @@ class MultiOutputResult {
   }
 
   /// Convert to map for method channel
-  Map<String, dynamic?> toMap() {
+  Map<String, dynamic> toMap() {
     return {
       'm4aPath': m4aPath,
       'wavPath': wavPath,

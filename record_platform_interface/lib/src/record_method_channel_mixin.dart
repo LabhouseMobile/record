@@ -63,7 +63,8 @@ mixin RecordMethodChannel implements RecordMethodChannelPlatformInterface {
   }
 
   @override
-  Future<void> start(String recorderId, RecordConfig config, {required String path}) {
+  Future<void> start(String recorderId, RecordConfig config,
+      {required String path}) {
     return _methodChannel.invokeMethod('start', {
       'recorderId': recorderId,
       'path': path,
@@ -105,7 +106,9 @@ mixin RecordMethodChannel implements RecordMethodChannelPlatformInterface {
       ...config.toMap(),
     });
 
-    return eventRecordChannel.receiveBroadcastStream().map<Uint8List>((data) => data);
+    return eventRecordChannel
+        .receiveBroadcastStream()
+        .map<Uint8List>((data) => data);
   }
 
   @override
@@ -177,7 +180,10 @@ mixin RecordMethodChannel implements RecordMethodChannelPlatformInterface {
       {'recorderId': recorderId},
     );
 
-    return devices?.map((d) => InputDevice.fromMap(d as Map)).toList(growable: false) ?? [];
+    return devices
+            ?.map((d) => InputDevice.fromMap(d as Map))
+            .toList(growable: false) ??
+        [];
   }
 
   @override

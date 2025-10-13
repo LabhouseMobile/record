@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 
 import 'package:record_platform_interface/record_platform_interface.dart';
@@ -191,7 +190,10 @@ class RecordLinux extends RecordPlatform {
     final outStreamCtrl = StreamController<List<int>>();
 
     final out = <String>[];
-    outStreamCtrl.stream.transform(utf8.decoder).transform(const LineSplitter()).listen((chunk) {
+    outStreamCtrl.stream
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen((chunk) {
       out.add(chunk);
     });
 
@@ -260,7 +262,8 @@ class RecordLinux extends RecordPlatform {
     return config.numChannels.clamp(1, 2);
   }
 
-  List<String> _getFfmpegEncoderSettings(AudioEncoder encoder, String path, int bitRate) {
+  List<String> _getFfmpegEncoderSettings(
+      AudioEncoder encoder, String path, int bitRate) {
     switch (encoder) {
       case AudioEncoder.aacLc:
         return ['-c:a', 'aac', '-b:a', '${bitRate / 1000}k', path];
@@ -339,7 +342,8 @@ class RecordLinux extends RecordPlatform {
       if (line.startsWith('Source #')) {
         if (currentDeviceId != null && currentDeviceName != null) {
           if (!currentDeviceName.startsWith('Monitor of')) {
-            devices.add(InputDevice(id: currentDeviceId, label: currentDeviceName));
+            devices.add(
+                InputDevice(id: currentDeviceId, label: currentDeviceName));
           }
         }
       } else if (line.trim().startsWith('node.name')) {
