@@ -11,6 +11,8 @@ class RecorderStreamDelegate: NSObject, AudioRecordingStreamDelegate {
   private var onPause: () -> ()
   private var onStop: () -> ()
   private let manageAudioSession: Bool
+  private var isResuming = false
+  private var isInterrupted = false
   
   init(manageAudioSession: Bool, onPause: @escaping () -> (), onStop: @escaping () -> ()) {
     self.manageAudioSession = manageAudioSession
@@ -66,10 +68,16 @@ class RecorderStreamDelegate: NSObject, AudioRecordingStreamDelegate {
     
     self.audioEngine = audioEngine
     
+    // Add observers for audio engine configuration changes
+    setupAudioEngineObservers()
+    
     self.config = config
   }
   
   func stop(completionHandler: @escaping (String?) -> ()) {
+    // Remove observers
+    removeAudioEngineObservers()
+    
     if let audioEngine = audioEngine {
       do {
         try setVoiceProcessing(echoCancel: false, autoGain: false, audioEngine: audioEngine)
@@ -87,12 +95,27 @@ class RecorderStreamDelegate: NSObject, AudioRecordingStreamDelegate {
   }
   
   func pause() {
+    isInterrupted = true
     audioEngine?.pause()
     onPause()
   }
   
   func resume() throws {
-    try audioEngine?.start()
+    guard let engine = audioEngine else {
+      throw RecorderError.error(message: "Failed to resume", details: "Audio engine is nil")
+    }
+    
+    isInterrupted = false
+    isResuming = true
+    
+    // Re-prepare the engine after interruption
+    engine.prepare()
+    try engine.start()
+    
+    // Reset flag after a short delay
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+      self.isResuming = false
+    }
   }
   
   func cancel() throws {
@@ -194,5 +217,96 @@ class RecorderStreamDelegate: NSObject, AudioRecordingStreamDelegate {
         )
       }
     }
+  }
+  
+  private func setupAudioEngineObservers() {
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleConfigurationChange),
+      name: .AVAudioEngineConfigurationChange,
+      object: audioEngine
+    )
+    
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleRouteChange),
+      name: AVAudioSession.routeChangeNotification,
+      object: nil
+    )
+    
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleMediaServicesReset),
+      name: AVAudioSession.mediaServicesWereResetNotification,
+      object: nil
+    )
+  }
+  
+  private func removeAudioEngineObservers() {
+    NotificationCenter.default.removeObserver(self, name: .AVAudioEngineConfigurationChange, object: audioEngine)
+    NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
+    NotificationCenter.default.removeObserver(self, name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
+  }
+  
+  @objc private func handleConfigurationChange(notification: Notification) {
+    NSLog("[Record] Audio engine configuration changed, interrupted=\(isInterrupted)")
+    
+    // Don't try to restart during an active interruption (phone call, etc.)
+    // The interruption end handler will take care of resuming
+    guard !isInterrupted else {
+      NSLog("[Record] Skipping restart during interruption")
+      return
+    }
+    
+    guard let engine = audioEngine, !engine.isRunning else {
+      return
+    }
+    
+    NSLog("[Record] Audio engine stopped after configuration change, attempting restart...")
+    
+    // Engine stopped, try to restart it
+    do {
+      engine.prepare()
+      try engine.start()
+      NSLog("[Record] Successfully restarted audio engine after configuration change")
+    } catch {
+      NSLog("[Record] Failed to restart audio engine: \(error.localizedDescription)")
+      stop { path in }
+    }
+  }
+  
+  @objc private func handleRouteChange(notification: Notification) {
+    guard let userInfo = notification.userInfo,
+          let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
+          let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else {
+      return
+    }
+    
+    NSLog("[Record] Audio route changed: reason=\(reason.rawValue), interrupted=\(isInterrupted), resuming=\(isResuming)")
+    
+    // Don't try to restart during an active interruption
+    guard !isInterrupted else {
+      NSLog("[Record] Skipping route change handling during interruption")
+      return
+    }
+    
+    // Only restart if we're resuming and the route change caused the engine to stop
+    if isResuming, let engine = audioEngine, !engine.isRunning {
+      NSLog("[Record] Audio engine stopped due to route change during resume, attempting restart...")
+      do {
+        engine.prepare()
+        try engine.start()
+        NSLog("[Record] Successfully restarted audio engine after route change")
+      } catch {
+        NSLog("[Record] Failed to restart audio engine after route change: \(error.localizedDescription)")
+      }
+    }
+  }
+  
+  @objc private func handleMediaServicesReset(notification: Notification) {
+    NSLog("[Record] Media services were reset, restarting recording...")
+    
+    // Media services reset requires full restart
+    stop { path in }
   }
 }
