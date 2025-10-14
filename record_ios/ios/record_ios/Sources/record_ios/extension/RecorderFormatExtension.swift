@@ -1,4 +1,94 @@
 import AVFoundation
+import CoreMedia
+
+extension AVAudioPCMBuffer {
+  func toCMSampleBuffer(presentationTime: CMTime) -> CMSampleBuffer? {
+    var asbd = format.streamDescription.pointee
+
+    var formatDesc: CMAudioFormatDescription?
+    let statusFmt = CMAudioFormatDescriptionCreate(allocator: kCFAllocatorDefault,
+                                                   asbd: &asbd,
+                                                   layoutSize: 0,
+                                                   layout: nil,
+                                                   magicCookieSize: 0,
+                                                   magicCookie: nil,
+                                                   extensions: nil,
+                                                   formatDescriptionOut: &formatDesc)
+    if statusFmt != noErr || formatDesc == nil {
+      return nil
+    }
+
+    // Calculate total data length for all channels
+    // Same regardless of interleaved vs non-interleaved - only the layout differs
+    let bytesPerSample = Int(format.streamDescription.pointee.mBitsPerChannel / 8)
+    let channelCount = Int(format.channelCount)
+    let totalDataLength = Int(frameLength) * channelCount * bytesPerSample
+
+    var blockBuffer: CMBlockBuffer?
+    let statusBB = CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault,
+                                                      memoryBlock: nil,
+                                                      blockLength: totalDataLength,
+                                                      blockAllocator: kCFAllocatorDefault,
+                                                      customBlockSource: nil,
+                                                      offsetToData: 0,
+                                                      dataLength: totalDataLength,
+                                                      flags: 0,
+                                                      blockBufferOut: &blockBuffer)
+    if statusBB != kCMBlockBufferNoErr { return nil }
+
+    guard let bb = blockBuffer else { return nil }
+
+    // Copy PCM data
+    if format.isInterleaved {
+      // Interleaved: single buffer
+      let buffer = audioBufferList.pointee.mBuffers
+      if let mData = buffer.mData {
+        let src = mData.assumingMemoryBound(to: UInt8.self)
+        CMBlockBufferReplaceDataBytes(with: src, blockBuffer: bb, offsetIntoDestination: 0, dataLength: totalDataLength)
+      } else {
+        return nil
+      }
+    } else {
+      // Non-interleaved: concatenate all channel buffers
+      var offset = 0
+      let channelDataLength = Int(frameLength) * bytesPerSample
+      let numBuffers = Int(audioBufferList.pointee.mNumberBuffers)
+      
+      // Access buffers using raw pointer arithmetic
+      let buffersPtr = withUnsafePointer(to: audioBufferList.pointee.mBuffers) { $0 }
+      let buffers = UnsafeBufferPointer(start: buffersPtr, count: numBuffers)
+      
+      for buffer in buffers {
+        if let mData = buffer.mData {
+          let src = mData.assumingMemoryBound(to: UInt8.self)
+          CMBlockBufferReplaceDataBytes(with: src, blockBuffer: bb, offsetIntoDestination: offset, dataLength: channelDataLength)
+          offset += channelDataLength
+        } else {
+          return nil
+        }
+      }
+    }
+
+    let duration = CMTime(value: Int64(frameLength), timescale: CMTimeScale(format.sampleRate))
+    var timing = CMSampleTimingInfo(duration: duration,
+                                    presentationTimeStamp: presentationTime,
+                                    decodeTimeStamp: .invalid)
+
+    var sampleBuffer: CMSampleBuffer?
+    let statusSB = CMSampleBufferCreateReady(allocator: kCFAllocatorDefault,
+                                             dataBuffer: bb,
+                                             formatDescription: formatDesc!,
+                                             sampleCount: CMItemCount(frameLength),
+                                             sampleTimingEntryCount: 1,
+                                             sampleTimingArray: &timing,
+                                             sampleSizeEntryCount: 0,
+                                             sampleSizeArray: nil,
+                                             sampleBufferOut: &sampleBuffer)
+    if statusSB != noErr { return nil }
+
+    return sampleBuffer
+  }
+}
 
 extension AudioRecordingDelegate {
   func getFileTypeFromSettings(_ settings: [String : Any]) -> AVFileType {

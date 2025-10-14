@@ -5,7 +5,6 @@ import com.llfbandit.record.record.AudioEncoder
 import com.llfbandit.record.record.PCMReader
 import com.llfbandit.record.record.RecordConfig
 import com.llfbandit.record.record.encoder.EncoderListener
-import com.llfbandit.record.record.encoder.IEncoder
 import com.llfbandit.record.record.format.AacFormat
 import com.llfbandit.record.record.format.AmrNbFormat
 import com.llfbandit.record.record.format.AmrWbFormat
@@ -14,18 +13,19 @@ import com.llfbandit.record.record.format.Format
 import com.llfbandit.record.record.format.OpusFormat
 import com.llfbandit.record.record.format.PcmFormat
 import com.llfbandit.record.record.format.WaveFormat
+import com.llfbandit.record.record.output.AudioOutputWriter
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.AtomicBoolean
 
-
 class RecordThread(
   private val config: RecordConfig,
-  private val recorderListener: OnAudioRecordListener
+  private val recorderListener: OnAudioRecordListener,
+  private val outputWriters: List<AudioOutputWriter> = emptyList(),
+  private val emitPcmToListener: Boolean = false,
 ) : EncoderListener {
   private var mPcmReader: PCMReader? = null
-  private var mEncoder: IEncoder? = null
 
   // Signals whether a recording is in progress (true) or not (false).
   private val mIsRecording = AtomicBoolean(false)
@@ -46,11 +46,11 @@ class RecordThread(
   }
 
   fun isRecording(): Boolean {
-    return mEncoder != null && mIsRecording.get()
+    return mPcmReader != null && mIsRecording.get()
   }
 
   fun isPaused(): Boolean {
-    return mEncoder != null && mIsPaused.get()
+    return mPcmReader != null && mIsPaused.get()
   }
 
   fun pauseRecording() {
@@ -90,13 +90,19 @@ class RecordThread(
     mExecutorService.execute {
       try {
         val format = selectFormat()
-        val (encoder, adjustedFormat) = format.getEncoder(config, this)
+        val (_, adjustedFormat) = format.getEncoder(config, this)
 
         mPcmReader = PCMReader(config, adjustedFormat)
         mPcmReader!!.start()
 
-        mEncoder = encoder
-        mEncoder!!.startEncoding()
+        // Initialize all output writers
+        outputWriters.forEach { writer ->
+          try {
+            writer.start()
+          } catch (ex: Exception) {
+            // Writer will handle its own error, continue with other writers
+          }
+        }
 
         recordState()
 
@@ -109,7 +115,15 @@ class RecordThread(
           } else {
             val buffer = mPcmReader!!.read()
             if (buffer.isNotEmpty()) {
-              mEncoder!!.encode(buffer)
+              // Emit PCM to Dart if requested
+              if (emitPcmToListener) {
+                recorderListener.onAudioChunk(buffer)
+              }
+
+              // Write to all output writers
+              outputWriters.forEach { writer ->
+                writer.write(buffer)
+              }
             }
           }
         }
@@ -130,11 +144,30 @@ class RecordThread(
       mPcmReader?.release()
       mPcmReader = null
 
-      mEncoder?.stopEncoding()
-      mEncoder = null
+      // Stop and release all output writers
+      outputWriters.forEach { writer ->
+        try {
+          writer.stop()
+        } catch (_: Exception) {
+          // Ignore errors during stop
+        }
+      }
+
+      outputWriters.forEach { writer ->
+        try {
+          writer.release()
+        } catch (_: Exception) {
+          // Ignore errors during release
+        }
+      }
 
       if (mHasBeenCanceled) {
-        Utils.deleteFile(config.path)
+        // Delete all output files
+        outputWriters.forEach { writer ->
+          writer.getOutputPath()?.let { path ->
+            Utils.deleteFile(path)
+          }
+        }
       }
     } catch (ex: Exception) {
       recorderListener.onFailure(ex)
@@ -169,5 +202,16 @@ class RecordThread(
     mIsPausedSem.release()
 
     recorderListener.onRecord()
+  }
+
+  /**
+   * Get results from all output writers.
+   * Returns a map of output path to error message (null if successful).
+   */
+  fun getOutputResults(): Map<String, String?> {
+    return outputWriters.associate { writer ->
+      val path = writer.getOutputPath() ?: "unknown"
+      path to writer.getError()
+    }
   }
 }

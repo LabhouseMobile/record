@@ -13,7 +13,7 @@ Pod::Spec.new do |s|
     s.source_files     = 'record_ios/Sources/record_ios/**/*.swift'
     s.swift_version    = '5.0'
     s.dependency 'Flutter'
-    s.platform         = :ios, '12.0'
+    s.platform         = :ios, '13.4'
     # Privacy manifest
     s.resource_bundles = {'record_ios_privacy' => ['record_ios/Sources/record_ios/Resources/PrivacyInfo.xcprivacy']}
 

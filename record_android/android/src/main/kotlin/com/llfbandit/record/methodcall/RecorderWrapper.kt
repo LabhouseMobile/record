@@ -9,6 +9,10 @@ import android.os.IBinder
 import com.llfbandit.record.record.RecordConfig
 import com.llfbandit.record.record.bluetooth.BluetoothReceiver
 import com.llfbandit.record.record.bluetooth.BluetoothScoListener
+import com.llfbandit.record.record.encoder.EncoderListener
+import com.llfbandit.record.record.output.AudioOutputWriter
+import com.llfbandit.record.record.output.EncoderOutputWriter
+import com.llfbandit.record.record.output.WavFileOutputWriter
 import com.llfbandit.record.record.recorder.AudioRecorder
 import com.llfbandit.record.record.recorder.IRecorder
 import com.llfbandit.record.record.recorder.MediaRecorder
@@ -45,15 +49,65 @@ class RecorderWrapper(
   }
 
   fun startRecordingToFile(config: RecordConfig, result: MethodChannel.Result) {
-    startRecording(config, result)
+    startRecording(config, emptyList(), result)
   }
 
   fun startRecordingToStream(config: RecordConfig, result: MethodChannel.Result) {
     if (config.useLegacy) {
       throw Exception("Cannot stream audio while using the legacy recorder")
     }
-    startRecording(config, result)
+    startRecording(config, emptyList(), result)
   }
+
+  fun startRecordingToDual(config: RecordConfig, basePath: String, result: MethodChannel.Result) {
+    if (config.useLegacy) {
+      throw Exception("Cannot stream audio while using the legacy recorder")
+    }
+
+    // Create output writers for dual mode
+    val outputWriters = mutableListOf<AudioOutputWriter>()
+    
+    // Add encoder output (M4A) - Force AAC encoding for M4A output
+    // Create a modified config with AAC encoder for the M4A file
+    val m4aConfig = RecordConfig(
+      path = config.path, // M4A path
+      encoder = "aacLc", // Force AAC encoding as string
+      bitRate = config.bitRate,
+      sampleRate = config.sampleRate,
+      numChannels = config.numChannels,
+      device = config.device,
+      autoGain = config.autoGain,
+      echoCancel = config.echoCancel,
+      noiseSuppress = config.noiseSuppress,
+      useLegacy = false,
+      service = config.service,
+      muteAudio = config.muteAudio,
+      manageBluetooth = config.manageBluetooth,
+      audioSource = config.audioSource,
+      speakerphone = config.speakerphone,
+      audioManagerMode = config.audioManagerMode,
+      audioInterruption = config.audioInterruption.ordinal, // Convert enum to Int
+      streamBufferSize = config.streamBufferSize
+    )
+    
+    val format = com.llfbandit.record.record.format.AacFormat()
+    val encoderListener = object : EncoderListener {
+      override fun onEncoderFailure(ex: Exception) {
+        // Errors are tracked internally by the writer
+      }
+      override fun onEncoderStream(bytes: ByteArray) {
+        // Stream is handled separately by RecordThread
+      }
+    }
+    outputWriters.add(EncoderOutputWriter(m4aConfig, format, encoderListener))
+    
+    // Add WAV output
+    val wavPath = "$basePath.wav"
+    outputWriters.add(WavFileOutputWriter(config, wavPath))
+    
+    startRecording(config, outputWriters, result)
+  }
+
 
   fun dispose() {
     try {
@@ -124,6 +178,41 @@ class RecorderWrapper(
     }
   }
 
+  fun stopDual(result: MethodChannel.Result) {
+    try {
+      if (recorder == null) {
+        result.success(null)
+        return
+      }
+      
+      // Stop recording and get output results
+      recorder?.stop { _ ->
+        val outputResults = if (recorder is AudioRecorder) {
+          (recorder as AudioRecorder).getOutputResults()
+        } else {
+          emptyMap()
+        }
+        
+        // Build response map with separate paths and errors
+        val m4aPath = outputResults.keys.firstOrNull { it.endsWith(".m4a") }
+        val wavPath = outputResults.keys.firstOrNull { it.endsWith(".wav") }
+        
+        val response = mapOf(
+          "m4aPath" to m4aPath,
+          "wavPath" to wavPath,
+          "m4aError" to outputResults[m4aPath],
+          "wavError" to outputResults[wavPath]
+        )
+        
+        result.success(response)
+      }
+    } catch (e: Exception) {
+      result.error("record", e.message, e.cause)
+    } finally {
+      stopService()
+    }
+  }
+
   fun cancel(result: MethodChannel.Result) {
     try {
       recorder?.cancel()
@@ -135,15 +224,19 @@ class RecorderWrapper(
     maybeStopBluetooth()
   }
 
-  private fun startRecording(config: RecordConfig, result: MethodChannel.Result) {
+  private fun startRecording(
+    config: RecordConfig,
+    outputWriters: List<AudioOutputWriter>,
+    result: MethodChannel.Result
+  ) {
     try {
       if (recorder == null) {
         recorder = createRecorder(config)
-        start(config, result)
+        start(config, outputWriters, result)
       } else if (recorder!!.isRecording) {
-        recorder!!.stop(fun(_) = start(config, result))
+        recorder!!.stop(fun(_) = start(config, outputWriters, result))
       } else {
-        start(config, result)
+        start(config, outputWriters, result)
       }
 
       startService(config)
@@ -168,8 +261,16 @@ class RecorderWrapper(
     )
   }
 
-  private fun start(config: RecordConfig, result: MethodChannel.Result) {
-    recorder!!.start(config)
+  private fun start(
+    config: RecordConfig,
+    outputWriters: List<AudioOutputWriter>,
+    result: MethodChannel.Result
+  ) {
+    if (recorder is AudioRecorder && outputWriters.isNotEmpty()) {
+      (recorder as AudioRecorder).startWithOutputs(config, outputWriters)
+    } else {
+      recorder!!.start(config)
+    }
     result.success(null)
   }
 

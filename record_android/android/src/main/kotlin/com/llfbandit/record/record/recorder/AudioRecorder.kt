@@ -11,6 +11,7 @@ import android.util.Log
 import com.llfbandit.record.record.AudioInterruption
 import com.llfbandit.record.record.RecordConfig
 import com.llfbandit.record.record.RecordState
+import com.llfbandit.record.record.output.AudioOutputWriter
 import com.llfbandit.record.record.stream.RecorderRecordStreamHandler
 import com.llfbandit.record.record.stream.RecorderStateStreamHandler
 
@@ -72,9 +73,24 @@ class AudioRecorder(
    */
   @Throws(Exception::class)
   override fun start(config: RecordConfig) {
+    startWithOutputs(config, emptyList())
+  }
+
+  /**
+   * Starts the recording with the given config and output writers.
+   * This allows recording to multiple output destinations simultaneously.
+   */
+  @Throws(Exception::class)
+  fun startWithOutputs(config: RecordConfig, outputWriters: List<AudioOutputWriter>) {
     this.config = config
 
-    recorderThread = RecordThread(config, this)
+    val emitPcm = !config.useLegacy
+    recorderThread = RecordThread(
+      config = config,
+      recorderListener = this,
+      outputWriters = outputWriters,
+      emitPcmToListener = emitPcm
+    )
     recorderThread!!.startRecording()
 
     assignAudioManagerSettings(config)
@@ -164,6 +180,14 @@ class AudioRecorder(
 
   override fun onAudioChunk(chunk: ByteArray) {
     recorderRecordStreamHandler.sendRecordChunkEvent(chunk)
+  }
+
+  /**
+   * Get the output results from all configured output writers.
+   * Returns a map of output path to error message (null if successful).
+   */
+  fun getOutputResults(): Map<String, String?> {
+    return recorderThread?.getOutputResults() ?: emptyMap()
   }
 
   // Save initial audio manager settings

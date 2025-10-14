@@ -80,15 +80,33 @@ extension AudioRecordingDelegate {
         let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
 
         if options.contains(.shouldResume) {
-          do {
-            try AVAudioSession.sharedInstance().setActive(true)
-            try resume()
-          } catch {
-            stop { path in }
+          // Delay before resume to allow hardware to become ready (especially in low power mode)
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.attemptResume(retryCount: 0, maxRetries: 3)
           }
         } else {
           stop { path in }
         }
+      }
+    }
+  }
+
+  private func attemptResume(retryCount: Int, maxRetries: Int) {
+    do {
+      try AVAudioSession.sharedInstance().setActive(true)
+      try resume()
+      NSLog("[Record] Successfully resumed after \(retryCount) retries")
+    } catch {
+      let nextRetry = retryCount + 1
+      if nextRetry < maxRetries {
+        let delay = 0.2 * pow(2.0, Double(retryCount)) // Exponential backoff: 200ms, 400ms, 800ms
+        NSLog("[Record] Resume attempt \(nextRetry) failed, retrying in \(delay)s: \(error.localizedDescription)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+          self.attemptResume(retryCount: nextRetry, maxRetries: maxRetries)
+        }
+      } else {
+        NSLog("[Record] Unable to resume after \(maxRetries) attempts: \(error.localizedDescription)")
+        stop { path in }
       }
     }
   }

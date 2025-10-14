@@ -69,6 +69,59 @@ class Recorder {
     updateState(RecordState.record)
   }
 
+  func startStreamDual(config: RecordConfig, basePath: String) throws {
+    stop(completionHandler: {(path) -> () in })
+
+    if config.encoder != AudioEncoder.pcm16bits.rawValue {
+      throw RecorderError.error(
+        message: "Failed to start recording",
+        details: "\(config.encoder) not supported in dual streaming mode. Use pcm16bits encoder."
+      )
+    }
+
+    // Create output writers for dual mode
+    let outputWriters: [AudioOutputWriter] = [
+      M4aFileOutputWriter(outputPath: basePath + ".m4a"),
+      WavFileOutputWriter(outputPath: basePath + ".wav")
+    ]
+
+    let delegate = RecorderMultiOutputDelegate(
+      outputWriters: outputWriters,
+      manageAudioSession: manageAudioSession,
+      onPause: {() -> () in self.updateState(RecordState.pause)},
+      onStop: {() -> () in self.updateState(RecordState.stop)}
+    )
+
+    try delegate.start(config: config, recordEventHandler: m_recordEventHandler)
+
+    self.delegate = delegate
+
+    updateState(RecordState.record)
+  }
+
+  func stopDual(completionHandler: @escaping (_ map: [String: Any?]) -> ()) {
+    if let d = delegate as? RecorderMultiOutputDelegate {
+      stop { _ in
+        let outputResults = d.getOutputResults()
+        
+        // Extract M4A and WAV paths/errors from results
+        let m4aPath = outputResults.keys.first { $0.hasSuffix(".m4a") }
+        let wavPath = outputResults.keys.first { $0.hasSuffix(".wav") }
+        
+        completionHandler([
+          "m4aPath": m4aPath,
+          "wavPath": wavPath,
+          "m4aError": m4aPath.map { outputResults[$0] } ?? nil,
+          "wavError": wavPath.map { outputResults[$0] } ?? nil
+        ])
+      }
+    } else {
+      stop { path in
+        completionHandler(["m4aPath": path, "wavPath": nil, "m4aError": nil, "wavError": nil])
+      }
+    }
+  }
+
   func stop(completionHandler: @escaping (_ path: String?) -> ()) {
     if isRecording() {
       delegate?.stop(completionHandler: {(path) -> () in

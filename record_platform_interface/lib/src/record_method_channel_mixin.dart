@@ -86,6 +86,26 @@ mixin RecordMethodChannel implements RecordMethodChannelPlatformInterface {
       ...config.toMap(),
     });
 
+    return eventRecordChannel.receiveBroadcastStream().map<Uint8List>((data) => data);
+  }
+
+  @override
+  Future<Stream<Uint8List>> startStreamDual(
+    String recorderId,
+    RecordConfig config, {
+    required String basePath,
+  }) async {
+    final eventRecordChannel = EventChannel(
+      'com.llfbandit.record/eventsRecord/$recorderId',
+    );
+
+    await _methodChannel.invokeMethod('startStreamDual', {
+      'recorderId': recorderId,
+      'path': '$basePath.m4a',
+      'basePath': basePath,
+      ...config.toMap(),
+    });
+
     return eventRecordChannel
         .receiveBroadcastStream()
         .map<Uint8List>((data) => data);
@@ -99,6 +119,16 @@ mixin RecordMethodChannel implements RecordMethodChannelPlatformInterface {
     );
 
     return outputPath;
+  }
+
+  @override
+  Future<MultiOutputResult> stopDual(String recorderId) async {
+    final result = await _methodChannel.invokeMethod(
+      'stopDual',
+      {'recorderId': recorderId},
+    );
+
+    return MultiOutputResult.fromMap(result as Map<dynamic, dynamic>?);
   }
 
   @override

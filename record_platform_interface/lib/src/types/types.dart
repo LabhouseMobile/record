@@ -5,5 +5,6 @@ export 'audio_interruption_mode.dart';
 export 'input_device.dart';
 export 'ios_audio_session.dart';
 export 'ios_record_config.dart';
+export 'multi_output_result.dart';
 export 'record_config.dart';
 export 'record_state.dart';
