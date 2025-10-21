@@ -36,7 +36,11 @@ abstract class RecorderDelegate {
 
   Future<Stream<Uint8List>> startStream(RecordConfig config);
 
+  Future<Stream<Uint8List>> startStreamDual(RecordConfig config, {required String basePath});
+
   Future<String?> stop();
+
+  Future<MultiOutputResult> stopDual();
 
   Future<web.MediaStream> initMediaStream(
     RecordConfig config,
@@ -135,8 +139,6 @@ abstract class RecorderDelegate {
 
   int _adjustNumChannels(RecordConfig config, web.MediaTrackSettings settings) {
     // Check for channelCount support (i.e. Safari)
-    return settings.hasProperty('channelCount'.toJS).toDart
-        ? settings.channelCount
-        : config.numChannels;
+    return settings.hasProperty('channelCount'.toJS).toDart ? settings.channelCount : config.numChannels;
   }
 }
