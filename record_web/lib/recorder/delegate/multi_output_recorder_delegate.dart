@@ -34,18 +34,9 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
   web.MediaRecorder? _mediaRecorder;
   List<web.Blob> _compressedChunks = [];
 
-  // Cached result URL for compressed branch
-  String? _compressedUrl;
-
   // Amplitude (computed from PCM frames)
   double _maxAmplitude = kMinAmplitude;
   double _amplitude = kMinAmplitude;
-
-  // Debug counters
-  int _pcmChunkCount = 0;
-  int _pcmByteCount = 0;
-  int _compressedChunkCount = 0;
-  int _compressedByteCount = 0;
 
   MultiOutputRecorderDelegate({required this.onStateChanged});
 
@@ -127,15 +118,6 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
       );
     }
 
-    debugPrint('[record_web] startStreamDual -> encoder=${config.encoder} sr=${config.sampleRate} ch=${config.numChannels}');
-
-    // Reset counters and previous branch caches
-    _pcmChunkCount = 0;
-    _pcmByteCount = 0;
-    _compressedChunkCount = 0;
-    _compressedByteCount = 0;
-    _compressedUrl = null;
-
     await _recordStreamCtrl?.close();
     _recordStreamCtrl = StreamController<Uint8List>();
 
@@ -152,7 +134,6 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
       sampleRate: config.sampleRate.toInt(),
       numChannels: config.numChannels,
     );
-    debugPrint('[record_web] Dual WAV branch initialized');
 
     // Compressed branch: use MediaRecorder if supported
     try {
@@ -164,13 +145,11 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
           web.MediaRecorderOptions(mimeType: preferredMime),
         );
         mr.ondataavailable = ((web.BlobEvent e) => _onCompressedData(e)).toJS;
-        mr.onstop = ((web.Event e) => _onCompressedStop()).toJS;
         mr.start(200);
         _mediaRecorder = mr;
-        debugPrint('[record_web] Compressed branch initialized -> mime=$preferredMime');
       }
-    } catch (e) {
-      debugPrint('[record_web] MediaRecorder unavailable for compressed branch: $e');
+    } catch (er) {
+      debugPrint(er.toString());
       _mediaRecorder = null; // compressed branch disabled
     }
 
@@ -183,40 +162,26 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     _mediaStream = mediaStream;
 
     onStateChanged(RecordState.record);
-    debugPrint('[record_web] startStreamDual -> recording started');
 
     return _recordStreamCtrl!.stream;
   }
 
   @override
-  @override
   Future<MultiOutputResult> stopDual() async {
-    debugPrint('[record_web] stopDual -> starting stop process');
-    debugPrint('[record_web] stopDual -> current chunks: ${_compressedChunks.length}');
-
     // Tear down audio context/stream graph first
     await resetContext(_context, _mediaStream);
     _mediaStream = null;
     _context = null;
 
-    // Store blobs and MIME type
+    // Store blobs
     web.Blob? compressedBlob;
-    String? compressedMimeType;
 
     // Stop MediaRecorder branch if running
     if (_mediaRecorder?.state == 'recording' || _mediaRecorder?.state == 'paused') {
-      debugPrint('[record_web] stopDual -> stopping MediaRecorder (state: ${_mediaRecorder?.state})');
-
-      // Store MIME type before stopping
-      compressedMimeType = _mediaRecorder?.mimeType;
-      debugPrint('[record_web] stopDual -> MediaRecorder mimeType: $compressedMimeType');
-
       // Create a completer to wait for onstop event
       final stopCompleter = Completer<void>();
 
       _mediaRecorder?.onstop = ((web.Event e) {
-        debugPrint('[record_web] stopDual -> onstop event fired');
-        // _onCompressedStop();
         stopCompleter.complete();
       }).toJS;
 
@@ -225,45 +190,24 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
       // Wait for stop event with timeout
       try {
         await stopCompleter.future.timeout(Duration(seconds: 5));
-        debugPrint('[record_web] stopDual -> MediaRecorder stopped successfully');
-      } catch (e) {
-        debugPrint('[record_web] stopDual -> MediaRecorder stop timeout: $e');
+      } catch (er) {
+        debugPrint(er.toString());
       }
-    } else {
-      debugPrint('[record_web] stopDual -> MediaRecorder not running (state: ${_mediaRecorder?.state})');
     }
 
-    // Create compressed blob from chunks (don't rely on _onCompressedStop)
+    // Create compressed blob from chunks
     if (_compressedChunks.isNotEmpty) {
-      debugPrint('[record_web] stopDual -> creating compressed blob from ${_compressedChunks.length} chunks');
       compressedBlob = web.Blob(_compressedChunks.toJS);
-
-      // Use stored MIME type or fallback
-      if (compressedMimeType == null || compressedMimeType.isEmpty) {
-        compressedMimeType = compressedBlob.type.isNotEmpty ? compressedBlob.type : 'audio/mp4';
-        debugPrint('[record_web] stopDual -> using fallback mimeType: $compressedMimeType');
-      }
-
-      debugPrint(
-          '[record_web] stopDual -> compressed blob created: size=${compressedBlob.size}, type=${compressedBlob.type}, mimeType=$compressedMimeType');
-    } else {
-      debugPrint('[record_web] stopDual -> no compressed chunks available');
     }
 
     // Finalize WAV branch
     web.Blob? wavBlob;
     try {
       wavBlob = _wavEncoder?.finish();
-      debugPrint('[record_web] stopDual -> WAV encoder finished, blob size: ${wavBlob?.size}');
       _wavEncoder?.cleanup();
       _wavEncoder = null;
-      if (wavBlob != null) {
-        debugPrint('[record_web] stopDual -> WAV blob created: size=${wavBlob.size}');
-      } else {
-        debugPrint('[record_web] stopDual -> WAV encoder returned null blob');
-      }
-    } catch (e) {
-      debugPrint('[record_web] stopDual -> WAV encoding error: $e');
+    } catch (er) {
+      debugPrint(er.toString());
     }
 
     onStateChanged(RecordState.stop);
@@ -272,22 +216,13 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     _compressedChunks = [];
 
     final result = MultiOutputResult(
-      m4aPath: null, // Don't return URLs on web
-      wavPath: null, // Don't return URLs on web
+      m4aPath: null, // Don't return paths on web
+      wavPath: null, // Don't return paths on web
       m4aBlob: compressedBlob,
       wavBlob: wavBlob,
-      m4aMimeType: compressedMimeType,
       m4aError: compressedBlob == null ? 'Compressed branch not available' : null,
       wavError: wavBlob == null ? 'WAV encoding failed or no data' : null,
     );
-
-    debugPrint('[record_web] stopDual -> final result:');
-    debugPrint('[record_web] stopDual ->   m4aBlob: ${result.m4aBlob?.size} bytes');
-    debugPrint('[record_web] stopDual ->   wavBlob: ${result.wavBlob?.size} bytes');
-    debugPrint('[record_web] stopDual ->   m4aMimeType: ${result.m4aMimeType}');
-    debugPrint('[record_web] stopDual ->   m4aError: ${result.m4aError}');
-    debugPrint('[record_web] stopDual ->   wavError: ${result.wavError}');
-    debugPrint('[record_web] stopDual ->   isSuccess: ${result.isSuccess}');
 
     return result;
   }
@@ -301,11 +236,6 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
       // Feed WAV branch
       _wavEncoder?.encode(out);
       _updateAmplitude(out);
-      _pcmChunkCount++;
-      _pcmByteCount += bytes.length;
-      if ((_pcmChunkCount % 50) == 0) {
-        debugPrint('[record_web] PCM stream -> chunks=$_pcmChunkCount bytes=$_pcmByteCount');
-      }
     }
   }
 
@@ -313,26 +243,7 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     final data = event.data;
     if (data.size > 0) {
       _compressedChunks.add(data);
-      _compressedChunkCount++;
-      _compressedByteCount += data.size.toInt();
-      if ((_compressedChunkCount % 10) == 0) {
-        debugPrint('[record_web] Compressed stream -> chunks=$_compressedChunkCount bytes=$_compressedByteCount');
-      }
-    } else {
-      debugPrint('[record_web] Compressed stream -> received empty chunk');
     }
-  }
-
-  void _onCompressedStop() {
-    debugPrint('[record_web] _onCompressedStop -> called with ${_compressedChunks.length} chunks');
-    if (_compressedChunks.isEmpty) {
-      debugPrint('[record_web] _onCompressedStop -> no chunks to process');
-      return;
-    }
-    final blob = web.Blob(_compressedChunks.toJS);
-    _compressedUrl = web.URL.createObjectURL(blob);
-    debugPrint('[record_web] _onCompressedStop -> created compressed blob URL: $_compressedUrl');
-    _compressedChunks = [];
   }
 
   Future<web.AudioWorkletNode> _createWorkletNode(
@@ -356,11 +267,16 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
 
   void _updateAmplitude(Int16List data) {
     var maxSample = kMinAmplitude;
+
     for (var i = 0; i < data.length; i++) {
-      final v = data[i].abs();
-      if (v > maxSample) maxSample = v.toDouble();
+      var curSample = data[i].abs();
+      if (curSample > maxSample) {
+        maxSample = curSample.toDouble();
+      }
     }
+
     _amplitude = 20 * (log(maxSample / 32767) / ln10);
+
     if (_amplitude > _maxAmplitude) {
       _maxAmplitude = _amplitude;
     }
