@@ -98,6 +98,11 @@ class MicRecorderDelegate extends RecorderDelegate {
   }
 
   @override
+  Future<Stream<Uint8List>> startStreamDual(RecordConfig config, {required String basePath}) async {
+    throw UnimplementedError();
+  }
+
+  @override
   Future<String?> stop() async {
     await _reset(resetEncoder: false);
 
@@ -108,6 +113,11 @@ class MicRecorderDelegate extends RecorderDelegate {
     onStateChanged(RecordState.stop);
 
     return blob != null ? web.URL.createObjectURL(blob) : null;
+  }
+
+  @override
+  Future<MultiOutputResult> stopDual() async {
+    throw UnimplementedError();
   }
 
   Future<void> _start(RecordConfig config, {bool isStream = false}) async {
@@ -135,11 +145,9 @@ class MicRecorderDelegate extends RecorderDelegate {
     }
 
     if (isStream) {
-      workletNode.port.onmessage =
-          ((web.MessageEvent event) => _onMessageStream(event)).toJS;
+      workletNode.port.onmessage = ((web.MessageEvent event) => _onMessageStream(event)).toJS;
     } else {
-      workletNode.port.onmessage =
-          ((web.MessageEvent event) => _onMessage(event)).toJS;
+      workletNode.port.onmessage = ((web.MessageEvent event) => _onMessage(event)).toJS;
     }
 
     _source = source;
@@ -154,9 +162,7 @@ class MicRecorderDelegate extends RecorderDelegate {
     web.AudioContext context,
     RecordConfig config,
   ) async {
-    await context.audioWorklet
-        .addModule('assets/packages/record_web/assets/js/record.worklet.js')
-        .toDart;
+    await context.audioWorklet.addModule('assets/packages/record_web/assets/js/record.worklet.js').toDart;
 
     return web.AudioWorkletNode(
       context,

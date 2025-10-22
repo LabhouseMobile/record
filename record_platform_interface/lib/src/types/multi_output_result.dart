@@ -1,3 +1,5 @@
+import 'package:web/web.dart' as web;
+
 /// Result from a multi-output recording session.
 /// Contains paths and error information for each output destination.
 class MultiOutputResult {
@@ -13,9 +15,17 @@ class MultiOutputResult {
   /// Error message from WAV writing, or null if successful
   final String? wavError;
 
+  /// Blob for the M4A output file, or null if writing failed
+  final web.Blob? m4aBlob;
+
+  /// Blob for the WAV output file, or null if writing failed
+  final web.Blob? wavBlob;
+
   const MultiOutputResult({
     this.m4aPath,
     this.wavPath,
+    this.m4aBlob,
+    this.wavBlob,
     this.m4aError,
     this.wavError,
   });
@@ -53,6 +63,8 @@ class MultiOutputResult {
       wavPath: map['wavPath'] as String?,
       m4aError: map['m4aError'] as String?,
       wavError: map['wavError'] as String?,
+      m4aBlob: map['m4aBlob'] as web.Blob?,
+      wavBlob: map['wavBlob'] as web.Blob?,
     );
   }
 
@@ -63,11 +75,22 @@ class MultiOutputResult {
       'wavPath': wavPath,
       'm4aError': m4aError,
       'wavError': wavError,
+      'm4aBlob': m4aBlob,
+      'wavBlob': wavBlob,
     };
   }
 
   @override
   String toString() {
-    return 'MultiOutputResult(m4aPath: $m4aPath, wavPath: $wavPath, m4aError: $m4aError, wavError: $wavError)';
+    return '''
+MultiOutputResult(
+  m4aPath: $m4aPath,
+  wavPath: $wavPath,
+  m4aError: $m4aError,
+  wavError: $wavError,
+  m4aBlob: $m4aBlob,
+  wavBlob: $wavBlob,
+)
+''';
   }
 }
