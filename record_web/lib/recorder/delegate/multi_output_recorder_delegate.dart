@@ -24,7 +24,6 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
   web.AudioWorkletNode? _workletNode;
   web.MediaStreamAudioSourceNode? _source;
 
-  // Streaming
   StreamController<Uint8List>? _recordStreamCtrl;
 
   // WAV encoder (manual)
@@ -121,12 +120,7 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     await _recordStreamCtrl?.close();
     _recordStreamCtrl = StreamController<Uint8List>();
 
-    // Setup microphone capture
-    final mediaStream = await initMediaStream(config);
-    final context = getContext(mediaStream, config);
-    final source = context.createMediaStreamSource(mediaStream);
-    final workletNode = await _createWorkletNode(context, config);
-    source.connect(workletNode)?.connect(context.destination);
+    await _setupMicrophoneCapture(config);
 
     // WAV branch: always available since we have PCM frames
     _wavEncoder?.cleanup();
@@ -135,84 +129,29 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
       numChannels: config.numChannels,
     );
 
-    // Compressed branch: use MediaRecorder if supported
-    try {
-      final preferredMime = getSupportedMimeType(AudioEncoder.aacLc) ?? getSupportedMimeType(AudioEncoder.opus);
+    await _setupMediaRecorder();
 
-      if (preferredMime != null) {
-        final mr = web.MediaRecorder(
-          mediaStream,
-          web.MediaRecorderOptions(mimeType: preferredMime),
-        );
-        mr.ondataavailable = ((web.BlobEvent e) => _onCompressedData(e)).toJS;
-        mr.start(200);
-        _mediaRecorder = mr;
-      }
-    } catch (er) {
-      debugPrint(er.toString());
-      _mediaRecorder = null; // compressed branch disabled
-    }
-
-    // Wire PCM streaming and amplitude + WAV encoding
-    workletNode.port.onmessage = ((web.MessageEvent e) => _onPcmMessage(e)).toJS;
-
-    _source = source;
-    _workletNode = workletNode;
-    _context = context;
-    _mediaStream = mediaStream;
+    // Connect PCM data processing pipeline
+    _workletNode?.port.onmessage = ((web.MessageEvent e) => _onPcmMessage(e)).toJS;
 
     onStateChanged(RecordState.record);
+
+    if (_recordStreamCtrl == null) throw Exception('Record stream controller not initialized');
 
     return _recordStreamCtrl!.stream;
   }
 
   @override
   Future<MultiOutputResult> stopDual() async {
-    // Tear down audio context/stream graph first
     await resetContext(_context, _mediaStream);
     _mediaStream = null;
     _context = null;
 
-    // Store blobs
-    web.Blob? compressedBlob;
-
-    // Stop MediaRecorder branch if running
-    if (_mediaRecorder?.state == 'recording' || _mediaRecorder?.state == 'paused') {
-      // Create a completer to wait for onstop event
-      final stopCompleter = Completer<void>();
-
-      _mediaRecorder?.onstop = ((web.Event e) {
-        stopCompleter.complete();
-      }).toJS;
-
-      _mediaRecorder?.stop();
-
-      // Wait for stop event with timeout
-      try {
-        await stopCompleter.future.timeout(Duration(seconds: 5));
-      } catch (er) {
-        debugPrint(er.toString());
-      }
-    }
-
-    // Create compressed blob from chunks
-    if (_compressedChunks.isNotEmpty) {
-      compressedBlob = web.Blob(_compressedChunks.toJS);
-    }
-
-    // Finalize WAV branch
-    web.Blob? wavBlob;
-    try {
-      wavBlob = _wavEncoder?.finish();
-      _wavEncoder?.cleanup();
-      _wavEncoder = null;
-    } catch (er) {
-      debugPrint(er.toString());
-    }
+    final compressedBlob = await _stopMediaRecorder();
+    final wavBlob = await _finalizeWavEncoder();
 
     onStateChanged(RecordState.stop);
 
-    // Clear compressed chunks after using them
     _compressedChunks = [];
 
     final result = MultiOutputResult(
@@ -228,21 +167,52 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
   }
 
   void _onPcmMessage(web.MessageEvent event) {
-    // data is Int16Array
-    final output = (event.data as JSInt16Array?)?.toDart;
-    if (output case final out?) {
-      final bytes = out.buffer.asUint8List();
-      _recordStreamCtrl?.add(bytes);
-      // Feed WAV branch
-      _wavEncoder?.encode(out);
-      _updateAmplitude(out);
+    final pcmData = (event.data as JSInt16Array?)?.toDart;
+    if (pcmData case final audioSamples?) {
+      final audioBytes = audioSamples.buffer.asUint8List();
+      _recordStreamCtrl?.add(audioBytes);
+      // Feed WAV encoder with PCM samples
+      _wavEncoder?.encode(audioSamples);
+      _updateAmplitude(audioSamples);
     }
   }
 
   void _onCompressedData(web.BlobEvent event) {
-    final data = event.data;
-    if (data.size > 0) {
-      _compressedChunks.add(data);
+    final compressedChunk = event.data;
+    if (compressedChunk.size > 0) {
+      _compressedChunks.add(compressedChunk);
+    }
+  }
+
+  Future<void> _setupMicrophoneCapture(RecordConfig config) async {
+    final mediaStream = await initMediaStream(config);
+    final context = getContext(mediaStream, config);
+    final source = context.createMediaStreamSource(mediaStream);
+    final workletNode = await _createWorkletNode(context, config);
+    source.connect(workletNode)?.connect(context.destination);
+
+    _source = source;
+    _workletNode = workletNode;
+    _context = context;
+    _mediaStream = mediaStream;
+  }
+
+  Future<void> _setupMediaRecorder() async {
+    try {
+      final preferredMimeType = getSupportedMimeType(AudioEncoder.aacLc) ?? getSupportedMimeType(AudioEncoder.opus);
+
+      if (preferredMimeType != null && _mediaStream != null) {
+        final mediaRecorder = web.MediaRecorder(
+          _mediaStream!,
+          web.MediaRecorderOptions(mimeType: preferredMimeType),
+        );
+        mediaRecorder.ondataavailable = ((web.BlobEvent e) => _onCompressedData(e)).toJS;
+        mediaRecorder.start(200);
+        _mediaRecorder = mediaRecorder;
+      }
+    } catch (er) {
+      debugPrint(er.toString());
+      _mediaRecorder = null;
     }
   }
 
@@ -265,16 +235,54 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     );
   }
 
-  void _updateAmplitude(Int16List data) {
+  Future<web.Blob?> _stopMediaRecorder() async {
+    if (_mediaRecorder?.state != 'recording' && _mediaRecorder?.state != 'paused') {
+      return null;
+    }
+
+    final stopCompleter = Completer<void>();
+    _mediaRecorder?.onstop = ((web.Event event) {
+      stopCompleter.complete();
+    }).toJS;
+
+    _mediaRecorder?.stop();
+
+    try {
+      await stopCompleter.future.timeout(Duration(seconds: 5));
+    } catch (error) {
+      debugPrint(error.toString());
+    }
+
+    if (_compressedChunks.isNotEmpty) {
+      return web.Blob(_compressedChunks.toJS);
+    }
+    return null;
+  }
+
+  Future<web.Blob?> _finalizeWavEncoder() async {
+    try {
+      final wavBlob = _wavEncoder?.finish();
+      _wavEncoder?.cleanup();
+      _wavEncoder = null;
+      return wavBlob;
+    } catch (error) {
+      debugPrint(error.toString());
+      return null;
+    }
+  }
+
+  void _updateAmplitude(Int16List audioData) {
     var maxSample = kMinAmplitude;
 
-    for (var i = 0; i < data.length; i++) {
-      var curSample = data[i].abs();
-      if (curSample > maxSample) {
-        maxSample = curSample.toDouble();
+    // Find the peak amplitude in the current audio frame
+    for (var i = 0; i < audioData.length; i++) {
+      var currentSample = audioData[i].abs();
+      if (currentSample > maxSample) {
+        maxSample = currentSample.toDouble();
       }
     }
 
+    // Convert to decibels (dB)
     _amplitude = 20 * (log(maxSample / 32767) / ln10);
 
     if (_amplitude > _maxAmplitude) {
