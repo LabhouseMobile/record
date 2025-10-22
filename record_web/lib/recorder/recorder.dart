@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:js_interop';
+import 'package:web/web.dart' as web;
 
 import 'package:flutter/foundation.dart';
 import 'package:record_platform_interface/record_platform_interface.dart';
@@ -8,7 +9,6 @@ import 'package:record_web/recorder/delegate/media_recorder_delegate.dart';
 import 'package:record_web/recorder/delegate/mic_recorder_delegate.dart';
 import 'package:record_web/recorder/delegate/multi_output_recorder_delegate.dart';
 import 'package:record_web/recorder/delegate/recorder_delegate.dart';
-import 'package:web/web.dart' as web;
 
 const kMaxAmplitude = 0.0;
 const kMinAmplitude = -160.0;

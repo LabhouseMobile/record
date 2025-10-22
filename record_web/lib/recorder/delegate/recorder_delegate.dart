@@ -139,8 +139,8 @@ abstract class RecorderDelegate {
 
   int _adjustNumChannels(RecordConfig config, web.MediaTrackSettings settings) {
     // Check for channelCount support (i.e. Safari)
-    return settings.hasProperty('channelCount'.toJS).toDart 
-        ? settings.channelCount 
+    return settings.hasProperty('channelCount'.toJS).toDart
+        ? settings.channelCount
         : config.numChannels;
   }
 }

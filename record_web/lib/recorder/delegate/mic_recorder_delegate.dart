@@ -145,10 +145,10 @@ class MicRecorderDelegate extends RecorderDelegate {
     }
 
     if (isStream) {
-      workletNode.port.onmessage = 
-          ((web.MessageEvent e) => _onMessageStream(e)).toJS;
+      workletNode.port.onmessage =
+          ((web.MessageEvent event) => _onMessageStream(event)).toJS;
     } else {
-      workletNode.port.onmessage = 
+      workletNode.port.onmessage =
           ((web.MessageEvent event) => _onMessage(event)).toJS;
     }
 
