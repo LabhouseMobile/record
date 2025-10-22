@@ -10,6 +10,7 @@ import 'package:record_web/encoder/wav_encoder.dart';
 import 'package:record_web/mime_types.dart';
 import 'package:record_web/recorder/delegate/recorder_delegate.dart';
 import 'package:record_web/recorder/recorder.dart';
+import 'package:record_web/services/audio_chunks_storage_service.dart';
 import 'package:web/web.dart' as web;
 
 /// Web delegate that supports dual-output recording:
@@ -47,11 +48,16 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
   int _compressedChunkCount = 0;
   int _compressedByteCount = 0;
 
+  // Persistent storage for crash recovery
+  final _storageService = AudioChunksStorageService();
+  String? _currentRecordingId;
+
   MultiOutputRecorderDelegate({required this.onStateChanged});
 
   @override
   Future<void> dispose() async {
     await stopDual();
+    await _storageService.close();
   }
 
   @override
@@ -128,6 +134,10 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     }
 
     debugPrint('[record_web] startStreamDual -> encoder=${config.encoder} sr=${config.sampleRate} ch=${config.numChannels}');
+
+    // Use basePath as recording ID (consistent with Android/iOS)
+    _currentRecordingId = basePath;
+    debugPrint('[record_web] startStreamDual -> recordingId=$_currentRecordingId');
 
     // Reset counters and previous branch caches
     _pcmChunkCount = 0;
@@ -271,6 +281,16 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     // Clear compressed chunks after using them
     _compressedChunks = [];
 
+    final currentRecordingId = _currentRecordingId;
+    if (currentRecordingId != null) {
+      _storageService.deleteChunks(currentRecordingId).catchError((e) {
+        if (kDebugMode) {
+          print('[record_web] Error deleting stored chunks: $e');
+        }
+      });
+      _currentRecordingId = null;
+    }
+
     final result = MultiOutputResult(
       m4aPath: null, // Don't return URLs on web
       wavPath: null, // Don't return URLs on web
@@ -303,10 +323,41 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
       _updateAmplitude(out);
       _pcmChunkCount++;
       _pcmByteCount += bytes.length;
+
+      final currentRecordingId = _currentRecordingId;
+      if (currentRecordingId == null) {
+        throw StateError('Recording ID is null during PCM recording');
+      }
+      _saveChunkToStorage(
+        recordingId: currentRecordingId,
+        chunkIndex: _pcmChunkCount,
+        chunkData: bytes,
+        chunkType: 'PCM',
+      );
+
       if ((_pcmChunkCount % 50) == 0) {
         debugPrint('[record_web] PCM stream -> chunks=$_pcmChunkCount bytes=$_pcmByteCount');
       }
     }
+  }
+
+  void _saveChunkToStorage({
+    required String recordingId,
+    required int chunkIndex,
+    required Uint8List chunkData,
+    required String chunkType,
+  }) {
+    _storageService
+        .saveChunk(
+      recordingId: recordingId,
+      chunkIndex: chunkIndex,
+      chunkData: chunkData,
+    )
+        .catchError((e) {
+      if (kDebugMode) {
+        print('[record_web] Error saving $chunkType chunk: $e');
+      }
+    });
   }
 
   void _onCompressedData(web.BlobEvent event) {
@@ -315,12 +366,44 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
       _compressedChunks.add(data);
       _compressedChunkCount++;
       _compressedByteCount += data.size.toInt();
+
+      final currentRecordingId = _currentRecordingId;
+      if (currentRecordingId == null) {
+        throw StateError('Recording ID is null during compressed recording');
+      }
+      _saveCompressedBlobAsChunk(
+        blob: data,
+        recordingId: currentRecordingId,
+        chunkIndex: _compressedChunkCount,
+      );
+
       if ((_compressedChunkCount % 10) == 0) {
         debugPrint('[record_web] Compressed stream -> chunks=$_compressedChunkCount bytes=$_compressedByteCount');
       }
     } else {
       debugPrint('[record_web] Compressed stream -> received empty chunk');
     }
+  }
+
+  void _saveCompressedBlobAsChunk({
+    required web.Blob blob,
+    required String recordingId,
+    required int chunkIndex,
+  }) {
+    final reader = web.FileReader();
+    reader.onloadend = ((web.Event e) async {
+      final result = reader.result;
+      if (result != null) {
+        final bytes = (result as JSArrayBuffer).toDart.asUint8List();
+        _saveChunkToStorage(
+          recordingId: recordingId,
+          chunkIndex: chunkIndex,
+          chunkData: bytes,
+          chunkType: 'compressed',
+        );
+      }
+    }).toJS;
+    reader.readAsArrayBuffer(blob);
   }
 
   void _onCompressedStop() {
