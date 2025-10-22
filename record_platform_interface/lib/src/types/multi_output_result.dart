@@ -21,15 +21,11 @@ class MultiOutputResult {
   /// Blob for the WAV output file, or null if writing failed
   final web.Blob? wavBlob;
 
-  /// Mime type for the M4A output file, or null if writing failed
-  final String? m4aMimeType;
-
   const MultiOutputResult({
     this.m4aPath,
     this.wavPath,
     this.m4aBlob,
     this.wavBlob,
-    this.m4aMimeType,
     this.m4aError,
     this.wavError,
   });
@@ -69,7 +65,6 @@ class MultiOutputResult {
       wavError: map['wavError'] as String?,
       m4aBlob: map['m4aBlob'] as web.Blob?,
       wavBlob: map['wavBlob'] as web.Blob?,
-      m4aMimeType: map['m4aMimeType'] as String?,
     );
   }
 
@@ -82,12 +77,20 @@ class MultiOutputResult {
       'wavError': wavError,
       'm4aBlob': m4aBlob,
       'wavBlob': wavBlob,
-      'm4aMimeType': m4aMimeType,
     };
   }
 
   @override
   String toString() {
-    return 'MultiOutputResult(m4aPath: $m4aPath, wavPath: $wavPath, m4aError: $m4aError, wavError: $wavError, m4aBlob: $m4aBlob, wavBlob: $wavBlob, m4aMimeType: $m4aMimeType)';
+    return '''
+MultiOutputResult(
+  m4aPath: $m4aPath,
+  wavPath: $wavPath,
+  m4aError: $m4aError,
+  wavError: $wavError,
+  m4aBlob: $m4aBlob,
+  wavBlob: $wavBlob,
+)
+''';
   }
 }
