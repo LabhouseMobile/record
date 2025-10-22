@@ -118,8 +118,9 @@ class MediaRecorderDelegate extends RecorderDelegate {
           mimeType: mimeType,
         ),
       );
-      mediaRecorder.ondataavailable = ((web.BlobEvent event) => _onDataAvailable(event)).toJS;
-      mediaRecorder.onstop = ((web.Event event) => _onStop()).toJS;
+      mediaRecorder.ondataavailable = 
+          ((web.BlobEvent e) => _onDataAvailable(e)).toJS;
+      mediaRecorder.onstop = ((web.Event e) => _onStop()).toJS;
 
       _elapsedTime.start();
 
@@ -279,6 +280,8 @@ class MediaRecorderDelegate extends RecorderDelegate {
 
     analyser.getFloatFrequencyData(jsArray);
 
-    return jsArray.toDart.reduce((value, element) => math.max(value, element)).toDouble();
+    return jsArray.toDart
+        .reduce((value, element) => math.max(value, element))
+        .toDouble();
   }
 }
