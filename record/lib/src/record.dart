@@ -268,6 +268,51 @@ class AudioRecorder {
   /// Returns [null] when not on iOS platform.
   RecordIos? get ios => _platform.getIos(_recorderId);
 
+  /// Recovers a pending recording by path (Web only)
+  ///
+  /// Returns the audio chunks if found, or null if no recording exists at that path.
+  /// This is useful for crash recovery - if the app crashed during recording,
+  /// you can attempt to recover the chunks that were saved to IndexedDB.
+  ///
+  /// Only available on Web platform. On other platforms, returns null.
+  ///
+  /// Example:
+  /// ```dart
+  /// final chunks = await recorder.recoverRecording('recording_123');
+  /// if (chunks != null) {
+  ///   // Reconstruct audio file from chunks
+  /// }
+  /// ```
+  Future<List<Uint8List>?> recoverRecording(String path) async {
+    // Call dynamic method only available in web implementation
+    try {
+      return await (_platform as dynamic).recoverRecording(path);
+    } catch (e) {
+      // Method not available on this platform
+      return null;
+    }
+  }
+
+  /// Deletes a pending recording by path (Web only)
+  ///
+  /// Use this to clean up stored chunks after successful recovery
+  /// or if the user chooses to discard the pending recording.
+  ///
+  /// Only available on Web platform. On other platforms, does nothing.
+  ///
+  /// Example:
+  /// ```dart
+  /// await recorder.deleteRecording('recording_123');
+  /// ```
+  Future<void> deleteRecording(String path) async {
+    // Call dynamic method only available in web implementation
+    try {
+      await (_platform as dynamic).deleteRecording(path);
+    } catch (e) {
+      // Method not available on this platform, silently ignore
+    }
+  }
+
   Future<void> _updateAmplitudeAtInterval() async {
     Future<bool> shouldUpdate() async {
       var result = _amplitudeStreamCtrl != null;

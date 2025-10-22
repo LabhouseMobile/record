@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_web_plugins/flutter_web_plugins.dart';
 import 'package:record_platform_interface/record_platform_interface.dart';
 import 'package:record_web/recorder/recorder.dart';
+import 'package:record_web/services/audio_chunks_storage_service.dart';
 
 class RecordPluginWeb {
   static void registerWith(Registrar registrar) {
@@ -14,6 +15,9 @@ class RecordPluginWeb {
 class RecordPluginWebWrapper extends RecordPlatform {
   // recorders from recorderId
   final _recorders = <String, Recorder>{};
+
+  // Shared storage service for recovery
+  final _storageService = AudioChunksStorageService();
 
   @override
   Future<void> create(String recorderId) async {
@@ -125,5 +129,36 @@ class RecordPluginWebWrapper extends RecordPlatform {
     }
 
     return recorder;
+  }
+
+  /// Recovers a pending recording by path
+  ///
+  /// Returns the audio chunks if found, or null if no recording exists at that path.
+  /// This is useful for crash recovery - if the app crashed during recording,
+  /// you can attempt to recover the chunks that were saved to IndexedDB.
+  ///
+  /// Example:
+  /// ```dart
+  /// final chunks = await record.recoverRecording('recording_123');
+  /// if (chunks != null) {
+  ///   // Reconstruct audio file from chunks
+  /// }
+  /// ```
+  Future<List<Uint8List>?> recoverRecording(String path) async {
+    final chunks = await _storageService.getChunks(path);
+    return chunks.isEmpty ? null : chunks;
+  }
+
+  /// Deletes a pending recording by path
+  ///
+  /// Use this to clean up stored chunks after successful recovery
+  /// or if the user chooses to discard the pending recording.
+  ///
+  /// Example:
+  /// ```dart
+  /// await record.deleteRecording('recording_123');
+  /// ```
+  Future<void> deleteRecording(String path) async {
+    await _storageService.deleteChunks(path);
   }
 }
