@@ -217,49 +217,6 @@ void main() {
       });
     });
 
-    group('getRecordingIds', () {
-      group('returns', () {
-        test('empty list when no chunks exist', () async {
-          final result = await service.getRecordingIds();
-
-          expect(result, isEmpty);
-        });
-
-        test('unique recording IDs when multiple chunks exist', () async {
-          final chunk0 = Uint8List.fromList([1, 2]);
-          final chunk1 = Uint8List.fromList([3, 4]);
-
-          await service.saveChunk(
-            recordingId: 'recording-1',
-            chunkIndex: 0,
-            chunkData: chunk0,
-          );
-          await service.saveChunk(
-            recordingId: 'recording-1',
-            chunkIndex: 1,
-            chunkData: chunk1,
-          );
-          await service.saveChunk(
-            recordingId: 'recording-2',
-            chunkIndex: 0,
-            chunkData: chunk0,
-          );
-          await service.saveChunk(
-            recordingId: 'recording-3',
-            chunkIndex: 0,
-            chunkData: chunk0,
-          );
-
-          final result = await service.getRecordingIds();
-
-          expect(result, hasLength(3));
-          expect(result, contains('recording-1'));
-          expect(result, contains('recording-2'));
-          expect(result, contains('recording-3'));
-        });
-      });
-    });
-
     group('multiple operations', () {
       test('can save and retrieve large number of chunks', () async {
         const recordingId = 'large-recording';

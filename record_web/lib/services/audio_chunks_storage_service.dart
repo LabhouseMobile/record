@@ -82,20 +82,4 @@ class AudioChunksStorageService extends BaseStorageService {
       await store.delete(key);
     }
   }
-
-  /// Get all unique recording IDs that have chunks stored
-  Future<List<String>> getRecordingIds() async {
-    final transaction = await getTransaction(idbModeReadOnly);
-    final store = transaction.objectStore(storeName);
-
-    final recordingIds = await _getRecordingIdsFrom(store);
-    await transaction.completed;
-
-    return recordingIds;
-  }
-
-  Future<List<String>> _getRecordingIdsFrom(ObjectStore store) async {
-    final keys = await store.getAllKeys();
-    return keys.where((key) => key.toString().contains('_')).map((key) => key.toString().split('_').first).toSet().toList();
-  }
 }
