@@ -32,14 +32,7 @@ class DatabaseManager {
       kDbName,
       version: kDbVersion,
       onUpgradeNeeded: (VersionChangeEvent event) {
-        final db = event.database;
-        // Create all required stores
-        if (!db.objectStoreNames.contains('chunks')) {
-          db.createObjectStore('chunks');
-        }
-        if (!db.objectStoreNames.contains('metadata')) {
-          db.createObjectStore('metadata');
-        }
+        _createAllRequiredStores(event.database);
       },
     );
 
@@ -49,6 +42,16 @@ class DatabaseManager {
     }
 
     return openedDb;
+  }
+
+  void _createAllRequiredStores(Database db) {
+    final storeNames = db.objectStoreNames;
+    if (!storeNames.contains('chunks')) {
+      db.createObjectStore('chunks');
+    }
+    if (!storeNames.contains('metadata')) {
+      db.createObjectStore('metadata');
+    }
   }
 
   Future<void> close() async {
