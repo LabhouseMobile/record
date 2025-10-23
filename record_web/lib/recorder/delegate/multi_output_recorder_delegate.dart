@@ -39,9 +39,8 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
   double _maxAmplitude = kMinAmplitude;
   double _amplitude = kMinAmplitude;
 
-  // Debug counters for storage
+  // Chunk counter for storage
   int _pcmChunkCount = 0;
-  int _compressedChunkCount = 0;
 
   // Persistent storage for crash recovery
   final _chunksService = AudioChunksStorageService();
@@ -131,9 +130,8 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     // Use basePath as recording ID
     _currentRecordingId = basePath;
 
-    // Reset counters
+    // Reset counter
     _pcmChunkCount = 0;
-    _compressedChunkCount = 0;
 
     await _saveMetadataForRecovery(
       recordingId: basePath,
@@ -268,32 +266,7 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     final compressedChunk = event.data;
     if (compressedChunk.size > 0) {
       _compressedChunks.add(compressedChunk);
-
-      _compressedChunkCount++;
-      _saveCompressedBlobAsChunk(
-        blob: compressedChunk,
-        chunkIndex: _compressedChunkCount,
-      );
     }
-  }
-
-  void _saveCompressedBlobAsChunk({
-    required web.Blob blob,
-    required int chunkIndex,
-  }) {
-    final reader = web.FileReader();
-    reader.onloadend = ((web.Event e) {
-      final result = reader.result;
-      if (result != null) {
-        final bytes = (result as JSArrayBuffer).toDart.asUint8List();
-        _saveChunkToStorage(
-          chunkIndex: chunkIndex,
-          chunkData: bytes,
-          chunkType: 'compressed',
-        );
-      }
-    }).toJS;
-    reader.readAsArrayBuffer(blob);
   }
 
   Future<void> _setupMicrophoneCapture(RecordConfig config) async {
