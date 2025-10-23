@@ -144,15 +144,6 @@ class RecordPluginWebWrapper extends RecordPlatform {
   /// you can attempt to recover the audio that was saved to IndexedDB.
   ///
   /// The returned bytes are a complete WAV file with headers, ready to upload or save.
-  ///
-  /// Example:
-  /// ```dart
-  /// final wavBytes = await record.recoverRecording('recording_123');
-  /// if (wavBytes != null) {
-  ///   // Upload the complete WAV file
-  ///   await uploadWavFile(wavBytes);
-  /// }
-  /// ```
   @override
   Future<Uint8List?> recoverRecording(String path) async {
     final chunks = await _chunksService.getChunks(path);
@@ -212,11 +203,6 @@ class RecordPluginWebWrapper extends RecordPlatform {
   ///
   /// Use this to clean up stored chunks after successful recovery
   /// or if the user chooses to discard the pending recording.
-  ///
-  /// Example:
-  /// ```dart
-  /// await record.deleteRecording('recording_123');
-  /// ```
   @override
   Future<void> deleteRecording(String path) async {
     await _chunksService.deleteChunks(path);

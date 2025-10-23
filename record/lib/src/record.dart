@@ -276,23 +276,6 @@ class AudioRecorder {
   /// This is useful for crash recovery on Web - if the app crashed during recording,
   /// you can recover the audio that was saved to IndexedDB and get it as a complete
   /// WAV file ready to upload or process.
-  ///
-  /// Example:
-  /// ```dart
-  /// try {
-  ///   final wavBytes = await recorder.recoverRecording('recording_123');
-  ///   if (wavBytes != null) {
-  ///     // Upload the complete WAV file
-  ///     await uploadWavFile(wavBytes);
-  ///   }
-  /// } on UnimplementedError {
-  ///   // Not on web - use filesystem directly
-  ///   final file = File('recording_123.wav');
-  ///   if (await file.exists()) {
-  ///     await uploadFile(file);
-  ///   }
-  /// }
-  /// ```
   Future<Uint8List?> recoverRecording(String path) {
     return _platform.recoverRecording(path);
   }
@@ -303,16 +286,6 @@ class AudioRecorder {
   /// or if the user chooses to discard the pending recording.
   ///
   /// On other platforms, throws [UnimplementedError] as this is web-specific functionality.
-  ///
-  /// Example:
-  /// ```dart
-  /// try {
-  ///   await recorder.deleteRecording('recording_123');
-  /// } on UnimplementedError {
-  ///   // Not on web - delete from filesystem
-  ///   await File('recording_123.wav').delete();
-  /// }
-  /// ```
   Future<void> deleteRecording(String path) {
     return _platform.deleteRecording(path);
   }
