@@ -11,6 +11,7 @@ import 'package:record_web/mime_types.dart';
 import 'package:record_web/recorder/delegate/recorder_delegate.dart';
 import 'package:record_web/recorder/recorder.dart';
 import 'package:record_web/services/audio_chunks_storage_service.dart';
+import 'package:record_web/services/metadata_storage_service.dart';
 import 'package:web/web.dart' as web;
 
 /// Web delegate that supports dual-output recording:
@@ -38,14 +39,13 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
   double _maxAmplitude = kMinAmplitude;
   double _amplitude = kMinAmplitude;
 
-  // Debug counters
+  // Debug counters for storage
   int _pcmChunkCount = 0;
-  int _pcmByteCount = 0;
   int _compressedChunkCount = 0;
-  int _compressedByteCount = 0;
 
   // Persistent storage for crash recovery
-  final _storageService = AudioChunksStorageService();
+  final _chunksService = AudioChunksStorageService();
+  final _metadataService = MetadataStorageService();
   String? _currentRecordingId;
 
   MultiOutputRecorderDelegate({required this.onStateChanged});
@@ -53,7 +53,6 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
   @override
   Future<void> dispose() async {
     await stopDual();
-    await _storageService.close();
   }
 
   @override
@@ -129,17 +128,18 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
       );
     }
 
-    debugPrint('[record_web] startStreamDual -> encoder=${config.encoder} sr=${config.sampleRate} ch=${config.numChannels}');
-
-    // Use basePath as recording ID (consistent with Android/iOS)
+    // Use basePath as recording ID
     _currentRecordingId = basePath;
-    debugPrint('[record_web] startStreamDual -> recordingId=$_currentRecordingId');
 
-    // Reset counters and previous branch caches
+    // Reset counters
     _pcmChunkCount = 0;
-    _pcmByteCount = 0;
     _compressedChunkCount = 0;
-    _compressedByteCount = 0;
+
+    await _saveMetadataForRecovery(
+      recordingId: basePath,
+      sampleRate: config.sampleRate.toInt(),
+      numChannels: config.numChannels,
+    );
 
     await _recordStreamCtrl?.close();
     _recordStreamCtrl = StreamController<Uint8List>();
@@ -165,6 +165,24 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     return _recordStreamCtrl!.stream;
   }
 
+  Future<void> _saveMetadataForRecovery({
+    required String recordingId,
+    required int sampleRate,
+    required int numChannels,
+  }) async {
+    _metadataService
+        .saveMetadata(
+      recordingId: recordingId,
+      sampleRate: sampleRate,
+      numChannels: numChannels,
+    )
+        .catchError((e) {
+      if (kDebugMode) {
+        print('[record_web] Error saving metadata: $e');
+      }
+    });
+  }
+
   @override
   Future<MultiOutputResult> stopDual() async {
     await resetContext(_context, _mediaStream);
@@ -180,9 +198,14 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
 
     final currentRecordingId = _currentRecordingId;
     if (currentRecordingId != null) {
-      _storageService.deleteChunks(currentRecordingId).catchError((e) {
+      _chunksService.deleteChunks(currentRecordingId).catchError((e) {
         if (kDebugMode) {
           print('[record_web] Error deleting stored chunks: $e');
+        }
+      });
+      _metadataService.deleteMetadata(currentRecordingId).catchError((e) {
+        if (kDebugMode) {
+          print('[record_web] Error deleting stored metadata: $e');
         }
       });
       _currentRecordingId = null;
@@ -208,33 +231,27 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
       // Feed WAV encoder with PCM samples
       _wavEncoder?.encode(audioSamples);
       _updateAmplitude(audioSamples);
-      _pcmChunkCount++;
-      _pcmByteCount += audioBytes.length;
 
-      final currentRecordingId = _currentRecordingId;
-      if (currentRecordingId == null) {
-        throw StateError('Recording ID is null during PCM recording');
-      }
+      _pcmChunkCount++;
       _saveChunkToStorage(
-        recordingId: currentRecordingId,
         chunkIndex: _pcmChunkCount,
         chunkData: audioBytes,
         chunkType: 'PCM',
       );
-
-      if ((_pcmChunkCount % 50) == 0) {
-        debugPrint('[record_web] PCM stream -> chunks=$_pcmChunkCount bytes=$_pcmByteCount');
-      }
     }
   }
 
   void _saveChunkToStorage({
-    required String recordingId,
     required int chunkIndex,
     required Uint8List chunkData,
     required String chunkType,
   }) {
-    _storageService
+    final recordingId = _currentRecordingId;
+    if (recordingId == null) {
+      throw StateError('Recording ID is null during PCM recording');
+    }
+
+    _chunksService
         .saveChunk(
       recordingId: recordingId,
       chunkIndex: chunkIndex,
@@ -251,37 +268,25 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     final compressedChunk = event.data;
     if (compressedChunk.size > 0) {
       _compressedChunks.add(compressedChunk);
-      _compressedChunkCount++;
-      _compressedByteCount += compressedChunk.size.toInt();
 
-      final currentRecordingId = _currentRecordingId;
-      if (currentRecordingId == null) {
-        throw StateError('Recording ID is null during compressed recording');
-      }
+      _compressedChunkCount++;
       _saveCompressedBlobAsChunk(
         blob: compressedChunk,
-        recordingId: currentRecordingId,
         chunkIndex: _compressedChunkCount,
       );
-
-      if ((_compressedChunkCount % 10) == 0) {
-        debugPrint('[record_web] Compressed stream -> chunks=$_compressedChunkCount bytes=$_compressedByteCount');
-      }
     }
   }
 
   void _saveCompressedBlobAsChunk({
     required web.Blob blob,
-    required String recordingId,
     required int chunkIndex,
   }) {
     final reader = web.FileReader();
-    reader.onloadend = ((web.Event e) async {
+    reader.onloadend = ((web.Event e) {
       final result = reader.result;
       if (result != null) {
         final bytes = (result as JSArrayBuffer).toDart.asUint8List();
         _saveChunkToStorage(
-          recordingId: recordingId,
           chunkIndex: chunkIndex,
           chunkData: bytes,
           chunkType: 'compressed',

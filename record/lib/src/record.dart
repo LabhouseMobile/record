@@ -268,49 +268,53 @@ class AudioRecorder {
   /// Returns [null] when not on iOS platform.
   RecordIos? get ios => _platform.getIos(_recorderId);
 
-  /// Recovers a pending recording by path (Web only)
+  /// Recovers a recording from persistent storage (Web only).
   ///
-  /// Returns the audio chunks if found, or null if no recording exists at that path.
-  /// This is useful for crash recovery - if the app crashed during recording,
-  /// you can attempt to recover the chunks that were saved to IndexedDB.
+  /// On Web, returns the complete WAV file as bytes reconstructed from IndexedDB.
+  /// On other platforms, throws [UnimplementedError] as recordings are stored in the filesystem.
   ///
-  /// Only available on Web platform. On other platforms, returns null.
+  /// This is useful for crash recovery on Web - if the app crashed during recording,
+  /// you can recover the audio that was saved to IndexedDB and get it as a complete
+  /// WAV file ready to upload or process.
   ///
   /// Example:
   /// ```dart
-  /// final chunks = await recorder.recoverRecording('recording_123');
-  /// if (chunks != null) {
-  ///   // Reconstruct audio file from chunks
+  /// try {
+  ///   final wavBytes = await recorder.recoverRecording('recording_123');
+  ///   if (wavBytes != null) {
+  ///     // Upload the complete WAV file
+  ///     await uploadWavFile(wavBytes);
+  ///   }
+  /// } on UnimplementedError {
+  ///   // Not on web - use filesystem directly
+  ///   final file = File('recording_123.wav');
+  ///   if (await file.exists()) {
+  ///     await uploadFile(file);
+  ///   }
   /// }
   /// ```
-  Future<List<Uint8List>?> recoverRecording(String path) async {
-    // Call dynamic method only available in web implementation
-    try {
-      return await (_platform as dynamic).recoverRecording(path);
-    } catch (e) {
-      // Method not available on this platform
-      return null;
-    }
+  Future<Uint8List?> recoverRecording(String path) {
+    return _platform.recoverRecording(path);
   }
 
-  /// Deletes a pending recording by path (Web only)
+  /// Deletes a recording from persistent storage (Web only).
   ///
   /// Use this to clean up stored chunks after successful recovery
   /// or if the user chooses to discard the pending recording.
   ///
-  /// Only available on Web platform. On other platforms, does nothing.
+  /// On other platforms, throws [UnimplementedError] as this is web-specific functionality.
   ///
   /// Example:
   /// ```dart
-  /// await recorder.deleteRecording('recording_123');
+  /// try {
+  ///   await recorder.deleteRecording('recording_123');
+  /// } on UnimplementedError {
+  ///   // Not on web - delete from filesystem
+  ///   await File('recording_123.wav').delete();
+  /// }
   /// ```
-  Future<void> deleteRecording(String path) async {
-    // Call dynamic method only available in web implementation
-    try {
-      await (_platform as dynamic).deleteRecording(path);
-    } catch (e) {
-      // Method not available on this platform, silently ignore
-    }
+  Future<void> deleteRecording(String path) {
+    return _platform.deleteRecording(path);
   }
 
   Future<void> _updateAmplitudeAtInterval() async {

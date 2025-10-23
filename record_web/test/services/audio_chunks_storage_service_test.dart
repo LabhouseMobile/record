@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:idb_shim/idb_io.dart';
 import 'package:record_web/services/audio_chunks_storage_service.dart';
+import 'package:record_web/services/database_manager.dart';
 
 void main() {
   group('AudioChunksStorageService', () {
@@ -12,12 +13,12 @@ void main() {
     setUp(() {
       // Use NEW in-memory database for each test
       factory = idbFactoryMemoryFs;
-      service = AudioChunksStorageService(idbFactory: factory);
+      DatabaseManager.instance.setFactory(factory);
+      service = AudioChunksStorageService();
     });
 
     tearDown(() async {
-      await service.close();
-      // Delete the database to ensure clean state
+      await DatabaseManager.instance.close();
       await factory.deleteDatabase('audio_chunks_db');
     });
 
@@ -256,21 +257,6 @@ void main() {
           expect(result, contains('recording-2'));
           expect(result, contains('recording-3'));
         });
-      });
-    });
-
-    group('close', () {
-      test('completes successfully', () async {
-        await service.close();
-
-        expect(true, isTrue);
-      });
-
-      test('can be called multiple times', () async {
-        await service.close();
-        await service.close();
-
-        expect(true, isTrue);
       });
     });
 

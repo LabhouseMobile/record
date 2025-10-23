@@ -63,8 +63,7 @@ mixin RecordMethodChannel implements RecordMethodChannelPlatformInterface {
   }
 
   @override
-  Future<void> start(String recorderId, RecordConfig config,
-      {required String path}) {
+  Future<void> start(String recorderId, RecordConfig config, {required String path}) {
     return _methodChannel.invokeMethod('start', {
       'recorderId': recorderId,
       'path': path,
@@ -106,9 +105,7 @@ mixin RecordMethodChannel implements RecordMethodChannelPlatformInterface {
       ...config.toMap(),
     });
 
-    return eventRecordChannel
-        .receiveBroadcastStream()
-        .map<Uint8List>((data) => data);
+    return eventRecordChannel.receiveBroadcastStream().map<Uint8List>((data) => data);
   }
 
   @override
@@ -161,6 +158,22 @@ mixin RecordMethodChannel implements RecordMethodChannelPlatformInterface {
   }
 
   @override
+  Future<Uint8List?> recoverRecording(String path) {
+    throw UnimplementedError(
+      'recoverRecording() is only available on Web platform. '
+      'On mobile platforms, recordings are stored in the filesystem.',
+    );
+  }
+
+  @override
+  Future<void> deleteRecording(String path) {
+    throw UnimplementedError(
+      'deleteRecording() is only available on Web platform. '
+      'On mobile platforms, recordings are stored in the filesystem.',
+    );
+  }
+
+  @override
   Future<bool> isEncoderSupported(
     String recorderId,
     AudioEncoder encoder,
@@ -180,10 +193,7 @@ mixin RecordMethodChannel implements RecordMethodChannelPlatformInterface {
       {'recorderId': recorderId},
     );
 
-    return devices
-            ?.map((d) => InputDevice.fromMap(d as Map))
-            .toList(growable: false) ??
-        [];
+    return devices?.map((d) => InputDevice.fromMap(d as Map)).toList(growable: false) ?? [];
   }
 
   @override

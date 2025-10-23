@@ -18,7 +18,7 @@ dependencies:
 
   web: ^1.0.0
   record_platform_interface: ^1.4.0
-  idb_shim: ^2.6.7
+  idb_shim: ^2.6.6
 
 dev_dependencies:
   flutter_test:

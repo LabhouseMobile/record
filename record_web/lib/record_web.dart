@@ -1,10 +1,15 @@
 import 'dart:async';
+import 'dart:js_interop';
+import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_web_plugins/flutter_web_plugins.dart';
 import 'package:record_platform_interface/record_platform_interface.dart';
+import 'package:record_web/encoder/wav_encoder.dart';
 import 'package:record_web/recorder/recorder.dart';
 import 'package:record_web/services/audio_chunks_storage_service.dart';
+import 'package:record_web/services/metadata_storage_service.dart';
+import 'package:web/web.dart' as web;
 
 class RecordPluginWeb {
   static void registerWith(Registrar registrar) {
@@ -16,8 +21,9 @@ class RecordPluginWebWrapper extends RecordPlatform {
   // recorders from recorderId
   final _recorders = <String, Recorder>{};
 
-  // Shared storage service for recovery
-  final _storageService = AudioChunksStorageService();
+  // Shared storage services for recovery
+  final _chunksService = AudioChunksStorageService();
+  final _metadataService = MetadataStorageService();
 
   @override
   Future<void> create(String recorderId) async {
@@ -124,30 +130,82 @@ class RecordPluginWebWrapper extends RecordPlatform {
     if (recorder == null) {
       throw PlatformException(
         code: 'record',
-        message:
-            'Record has not yet been created or has already been disposed.',
+        message: 'Record has not yet been created or has already been disposed.',
       );
     }
 
     return recorder;
   }
 
-  /// Recovers a pending recording by path
+  /// Recovers a pending recording by path, reconstructed as a complete WAV file
   ///
-  /// Returns the audio chunks if found, or null if no recording exists at that path.
+  /// Returns the complete WAV file as bytes if found, or null if no recording exists.
   /// This is useful for crash recovery - if the app crashed during recording,
-  /// you can attempt to recover the chunks that were saved to IndexedDB.
+  /// you can attempt to recover the audio that was saved to IndexedDB.
+  ///
+  /// The returned bytes are a complete WAV file with headers, ready to upload or save.
   ///
   /// Example:
   /// ```dart
-  /// final chunks = await record.recoverRecording('recording_123');
-  /// if (chunks != null) {
-  ///   // Reconstruct audio file from chunks
+  /// final wavBytes = await record.recoverRecording('recording_123');
+  /// if (wavBytes != null) {
+  ///   // Upload the complete WAV file
+  ///   await uploadWavFile(wavBytes);
   /// }
   /// ```
-  Future<List<Uint8List>?> recoverRecording(String path) async {
-    final chunks = await _storageService.getChunks(path);
-    return chunks.isEmpty ? null : chunks;
+  @override
+  Future<Uint8List?> recoverRecording(String path) async {
+    final chunks = await _chunksService.getChunks(path);
+    if (chunks.isEmpty) return null;
+
+    final metadata = await _metadataService.getMetadata(path);
+    if (metadata == null) return null;
+
+    final wavEncoder = _createWavEncoderFromMetadata(metadata);
+    for (final chunk in chunks) {
+      final int16Data = Int16List.view(chunk.buffer);
+      wavEncoder.encode(int16Data);
+    }
+    final wavBlob = wavEncoder.finish();
+
+    // Convert Blob to Uint8List
+    final reader = web.FileReader();
+    final completer = Completer<Uint8List>();
+
+    reader.onloadend = ((web.Event e) {
+      try {
+        final result = reader.result;
+        final bytes = _convertReaderResultToUint8List(result);
+        completer.complete(bytes);
+      } catch (e) {
+        completer.completeError(e);
+      }
+    }).toJS;
+
+    reader.onerror = ((web.Event e) {
+      completer.completeError('Error reading WAV blob');
+    }).toJS;
+
+    reader.readAsArrayBuffer(wavBlob);
+
+    return completer.future;
+  }
+
+  WavEncoder _createWavEncoderFromMetadata(Map<String, dynamic> metadata) {
+    final sampleRate = metadata['sampleRate'] as int? ?? 44100;
+    final numChannels = metadata['numChannels'] as int? ?? 1;
+    return WavEncoder(
+      sampleRate: sampleRate,
+      numChannels: numChannels,
+    );
+  }
+
+  Uint8List _convertReaderResultToUint8List(JSAny? result) {
+    if (result != null) {
+      return (result as JSArrayBuffer).toDart.asUint8List();
+    } else {
+      throw Exception('Failed to read WAV blob');
+    }
   }
 
   /// Deletes a pending recording by path
@@ -159,7 +217,9 @@ class RecordPluginWebWrapper extends RecordPlatform {
   /// ```dart
   /// await record.deleteRecording('recording_123');
   /// ```
+  @override
   Future<void> deleteRecording(String path) async {
-    await _storageService.deleteChunks(path);
+    await _chunksService.deleteChunks(path);
+    await _metadataService.deleteMetadata(path);
   }
 }

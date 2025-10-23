@@ -1,58 +1,16 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:idb_shim/idb_browser.dart';
+import 'package:idb_shim/idb.dart';
+
+import 'base_storage_service.dart';
 
 /// Service to store audio chunks progressively using IndexedDB
 /// This allows recovery of recordings if the page is closed during recording
-class AudioChunksStorageService {
-  AudioChunksStorageService({IdbFactory? idbFactory})
-      : _idbFactory = idbFactory;
+class AudioChunksStorageService extends BaseStorageService {
+  AudioChunksStorageService() : super(storeName: kChunksStoreName);
 
-  static const _kDbName = 'audio_chunks_db';
-  static const _kStoreName = 'chunks';
-  static const _kDbVersion = 1;
-
-  final IdbFactory? _idbFactory;
-  Database? _db;
-
-  Future<Transaction> _getTransaction(String mode) async {
-    await _initializeIfNeeded();
-    final db = _db;
-    if (db == null) {
-      throw Exception('Database not initialized');
-    }
-    return db.transaction(_kStoreName, mode);
-  }
-
-  Future<void> _initializeIfNeeded() async {
-    if (_db != null) return;
-
-    try {
-      final factory = _idbFactory ?? getIdbFactory();
-
-      if (factory == null) {
-        throw Exception('No database factory found');
-      }
-
-      _db = await factory.open(
-        _kDbName,
-        version: _kDbVersion,
-        onUpgradeNeeded: (VersionChangeEvent event) {
-          final db = event.database;
-          final chunksStoreExists = db.objectStoreNames.contains(_kStoreName);
-          if (!chunksStoreExists) {
-            db.createObjectStore(_kStoreName);
-          }
-        },
-      );
-    } catch (e) {
-      if (kDebugMode) {
-        print('Error initializing database: $e');
-      }
-      rethrow;
-    }
-  }
+  static const kChunksStoreName = 'chunks';
 
   Future<void> saveChunk({
     required String recordingId,
@@ -60,8 +18,8 @@ class AudioChunksStorageService {
     required Uint8List chunkData,
   }) async {
     try {
-      final transaction = await _getTransaction(idbModeReadWrite);
-      final store = transaction.objectStore(_kStoreName);
+      final transaction = await getTransaction(idbModeReadWrite);
+      final store = transaction.objectStore(storeName);
       final key = '${recordingId}_$chunkIndex';
 
       await store.put(chunkData, key);
@@ -77,8 +35,8 @@ class AudioChunksStorageService {
   /// Get all chunks for a recording, ordered by chunk index
   Future<List<Uint8List>> getChunks(String recordingId) async {
     try {
-      final transaction = await _getTransaction(idbModeReadOnly);
-      final store = transaction.objectStore(_kStoreName);
+      final transaction = await getTransaction(idbModeReadOnly);
+      final store = transaction.objectStore(storeName);
 
       final chunks = await _getChunksFrom(store, recordingId);
       await transaction.completed;
@@ -93,8 +51,7 @@ class AudioChunksStorageService {
     }
   }
 
-  Future<Map<int, Uint8List>> _getChunksFrom(
-      ObjectStore store, String recordingId) async {
+  Future<Map<int, Uint8List>> _getChunksFrom(ObjectStore store, String recordingId) async {
     final keys = await store.getAllKeys();
     final chunks = <int, Uint8List>{};
 
@@ -115,8 +72,8 @@ class AudioChunksStorageService {
 
   Future<void> deleteChunks(String recordingId) async {
     try {
-      final transaction = await _getTransaction(idbModeReadWrite);
-      final store = transaction.objectStore(_kStoreName);
+      final transaction = await getTransaction(idbModeReadWrite);
+      final store = transaction.objectStore(storeName);
 
       final keysToDelete = await _getKeysToDelete(
         store: store,
@@ -138,22 +95,20 @@ class AudioChunksStorageService {
     required String recordingId,
   }) async {
     final keys = await store.getAllKeys();
-    return keys
-        .where((key) => key.toString().startsWith('${recordingId}_'))
-        .map((key) => key.toString())
-        .toList();
+    return keys.where((key) => key.toString().startsWith('${recordingId}_')).map((key) => key.toString()).toList();
   }
 
-  Future<void> _deleteEachKey(List<String> keys, ObjectStore store) async {
-    for (final key in keys) {
+  Future<void> _deleteEachKey(List<String> keysToDelete, ObjectStore store) async {
+    for (final key in keysToDelete) {
       await store.delete(key);
     }
   }
 
+  /// Get all unique recording IDs that have chunks stored
   Future<List<String>> getRecordingIds() async {
     try {
-      final transaction = await _getTransaction(idbModeReadOnly);
-      final store = transaction.objectStore(_kStoreName);
+      final transaction = await getTransaction(idbModeReadOnly);
+      final store = transaction.objectStore(storeName);
 
       final recordingIds = await _getRecordingIdsFrom(store);
       await transaction.completed;
@@ -169,16 +124,6 @@ class AudioChunksStorageService {
 
   Future<List<String>> _getRecordingIdsFrom(ObjectStore store) async {
     final keys = await store.getAllKeys();
-    return keys
-        .where((key) => key.toString().contains('_'))
-        .map((key) => key.toString().split('_').first)
-        .toSet()
-        .toList();
-  }
-
-  /// Close the database connection
-  Future<void> close() async {
-    _db?.close();
-    _db = null;
+    return keys.where((key) => key.toString().contains('_')).map((key) => key.toString().split('_').first).toSet().toList();
   }
 }
