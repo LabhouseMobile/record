@@ -34,21 +34,14 @@ class AudioChunksStorageService extends BaseStorageService {
 
   /// Get all chunks for a recording, ordered by chunk index
   Future<List<Uint8List>> getChunks(String recordingId) async {
-    try {
-      final transaction = await getTransaction(idbModeReadOnly);
-      final store = transaction.objectStore(storeName);
+    final transaction = await getTransaction(idbModeReadOnly);
+    final store = transaction.objectStore(storeName);
 
-      final chunks = await _getChunksFrom(store, recordingId);
-      await transaction.completed;
+    final chunks = await _getChunksFrom(store, recordingId);
+    await transaction.completed;
 
-      final sortedKeys = chunks.keys.toList()..sort();
-      return sortedKeys.map((i) => chunks[i]).whereType<Uint8List>().toList();
-    } catch (e) {
-      if (kDebugMode) {
-        print('Error getting chunks: $e');
-      }
-      return [];
-    }
+    final sortedKeys = chunks.keys.toList()..sort();
+    return sortedKeys.map((i) => chunks[i]).whereType<Uint8List>().toList();
   }
 
   Future<Map<int, Uint8List>> _getChunksFrom(ObjectStore store, String recordingId) async {
