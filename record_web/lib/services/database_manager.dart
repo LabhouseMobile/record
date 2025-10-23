@@ -43,12 +43,12 @@ class DatabaseManager {
       },
     );
 
-    final db = _db;
-    if (db == null) {
+    final openedDb = _db;
+    if (openedDb == null) {
       throw Exception('Failed to open database');
     }
 
-    return db;
+    return openedDb;
   }
 
   Future<void> close() async {
