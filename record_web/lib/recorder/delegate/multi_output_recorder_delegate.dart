@@ -132,7 +132,7 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     // Reset counter
     _pcmChunkCount = 0;
 
-    await _saveMetadataForRecovery(
+    _saveMetadataForRecovery(
       recordingId: basePath,
       sampleRate: config.sampleRate.toInt(),
       numChannels: config.numChannels,
@@ -162,11 +162,11 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     return _recordStreamCtrl!.stream;
   }
 
-  Future<void> _saveMetadataForRecovery({
+  void _saveMetadataForRecovery({
     required String recordingId,
     required int sampleRate,
     required int numChannels,
-  }) async {
+  }) {
     _metadataService
         .saveMetadata(
       recordingId: recordingId,
