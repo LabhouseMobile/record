@@ -17,19 +17,12 @@ class AudioChunksStorageService extends BaseStorageService {
     required int chunkIndex,
     required Uint8List chunkData,
   }) async {
-    try {
-      final transaction = await getTransaction(idbModeReadWrite);
-      final store = transaction.objectStore(storeName);
-      final key = '${recordingId}_$chunkIndex';
+    final transaction = await getTransaction(idbModeReadWrite);
+    final store = transaction.objectStore(storeName);
+    final key = '${recordingId}_$chunkIndex';
 
-      await store.put(chunkData, key);
-      await transaction.completed;
-    } catch (e) {
-      if (kDebugMode) {
-        print('Error saving chunk: $e');
-      }
-      rethrow;
-    }
+    await store.put(chunkData, key);
+    await transaction.completed;
   }
 
   /// Get all chunks for a recording, ordered by chunk index
@@ -64,23 +57,16 @@ class AudioChunksStorageService extends BaseStorageService {
   }
 
   Future<void> deleteChunks(String recordingId) async {
-    try {
-      final transaction = await getTransaction(idbModeReadWrite);
-      final store = transaction.objectStore(storeName);
+    final transaction = await getTransaction(idbModeReadWrite);
+    final store = transaction.objectStore(storeName);
 
-      final keysToDelete = await _getKeysToDelete(
-        store: store,
-        recordingId: recordingId,
-      );
+    final keysToDelete = await _getKeysToDelete(
+      store: store,
+      recordingId: recordingId,
+    );
 
-      await _deleteEachKey(keysToDelete, store);
-      await transaction.completed;
-    } catch (e) {
-      if (kDebugMode) {
-        print('Error deleting chunks: $e');
-      }
-      rethrow;
-    }
+    await _deleteEachKey(keysToDelete, store);
+    await transaction.completed;
   }
 
   Future<List<String>> _getKeysToDelete({

@@ -32,35 +32,22 @@ class MetadataStorageService extends BaseStorageService {
   }
 
   Future<Map<String, dynamic>?> getMetadata(String recordingId) async {
-    try {
-      final transaction = await getTransaction(idbModeReadOnly);
-      final store = transaction.objectStore(storeName);
+    final transaction = await getTransaction(idbModeReadOnly);
+    final store = transaction.objectStore(storeName);
 
-      final data = await store.getObject(recordingId);
-      await transaction.completed;
+    final data = await store.getObject(recordingId);
+    await transaction.completed;
 
-      if (data is Map) {
-        return Map<String, dynamic>.from(data);
-      }
-      return null;
-    } catch (e) {
-      if (kDebugMode) {
-        print('Error getting metadata: $e');
-      }
-      return null;
+    if (data is Map) {
+      return Map<String, dynamic>.from(data);
     }
+    return null;
   }
 
   Future<void> deleteMetadata(String recordingId) async {
-    try {
-      final transaction = await getTransaction(idbModeReadWrite);
-      final store = transaction.objectStore(storeName);
-      await store.delete(recordingId);
-      await transaction.completed;
-    } catch (e) {
-      if (kDebugMode) {
-        print('Error deleting metadata: $e');
-      }
-    }
+    final transaction = await getTransaction(idbModeReadWrite);
+    final store = transaction.objectStore(storeName);
+    await store.delete(recordingId);
+    await transaction.completed;
   }
 }

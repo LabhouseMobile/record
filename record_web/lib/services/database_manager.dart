@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:idb_shim/idb_browser.dart';
 
 /// Singleton manager for IndexedDB database
@@ -23,40 +22,33 @@ class DatabaseManager {
     final db = _db;
     if (db != null) return db;
 
-    try {
-      final factory = _customFactory ?? getIdbFactory();
+    final factory = _customFactory ?? getIdbFactory();
 
-      if (factory == null) {
-        throw Exception('No database factory found');
-      }
-
-      _db = await factory.open(
-        kDbName,
-        version: kDbVersion,
-        onUpgradeNeeded: (VersionChangeEvent event) {
-          final db = event.database;
-          // Create all required stores
-          if (!db.objectStoreNames.contains('chunks')) {
-            db.createObjectStore('chunks');
-          }
-          if (!db.objectStoreNames.contains('metadata')) {
-            db.createObjectStore('metadata');
-          }
-        },
-      );
-
-      final db = _db;
-      if (db == null) {
-        throw Exception('Failed to open database');
-      }
-
-      return db;
-    } catch (e) {
-      if (kDebugMode) {
-        print('Error initializing database: $e');
-      }
-      rethrow;
+    if (factory == null) {
+      throw Exception('No database factory found');
     }
+
+    _db = await factory.open(
+      kDbName,
+      version: kDbVersion,
+      onUpgradeNeeded: (VersionChangeEvent event) {
+        final db = event.database;
+        // Create all required stores
+        if (!db.objectStoreNames.contains('chunks')) {
+          db.createObjectStore('chunks');
+        }
+        if (!db.objectStoreNames.contains('metadata')) {
+          db.createObjectStore('metadata');
+        }
+      },
+    );
+
+    final db = _db;
+    if (db == null) {
+      throw Exception('Failed to open database');
+    }
+
+    return db;
   }
 
   Future<void> close() async {
