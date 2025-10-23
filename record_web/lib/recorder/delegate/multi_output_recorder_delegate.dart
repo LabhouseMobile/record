@@ -127,7 +127,6 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
       );
     }
 
-    // Use basePath as recording ID
     _currentRecordingId = basePath;
 
     // Reset counter
