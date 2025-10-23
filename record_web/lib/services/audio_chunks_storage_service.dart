@@ -3,12 +3,14 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:idb_shim/idb.dart';
 
-import 'base_storage_service.dart';
+import 'database_manager.dart';
 
 /// Service to store audio chunks progressively using IndexedDB
 /// This allows recovery of recordings if the page is closed during recording
-class AudioChunksStorageService extends BaseStorageService {
-  AudioChunksStorageService() : super(storeName: kChunksStoreName);
+class AudioChunksStorageService {
+  AudioChunksStorageService() {
+    DatabaseManager.registerStore(kChunksStoreName);
+  }
 
   static const kChunksStoreName = 'chunks';
 
@@ -17,8 +19,8 @@ class AudioChunksStorageService extends BaseStorageService {
     required int chunkIndex,
     required Uint8List chunkData,
   }) async {
-    final transaction = await getTransaction(idbModeReadWrite);
-    final store = transaction.objectStore(storeName);
+    final transaction = await _getTransaction(idbModeReadWrite);
+    final store = transaction.objectStore(kChunksStoreName);
     final key = '${recordingId}_$chunkIndex';
 
     await store.put(chunkData, key);
@@ -27,8 +29,8 @@ class AudioChunksStorageService extends BaseStorageService {
 
   /// Get all chunks for a recording, ordered by chunk index
   Future<List<Uint8List>> getChunks(String recordingId) async {
-    final transaction = await getTransaction(idbModeReadOnly);
-    final store = transaction.objectStore(storeName);
+    final transaction = await _getTransaction(idbModeReadOnly);
+    final store = transaction.objectStore(kChunksStoreName);
 
     final chunks = await _getChunksFrom(store, recordingId);
     await transaction.completed;
@@ -57,8 +59,8 @@ class AudioChunksStorageService extends BaseStorageService {
   }
 
   Future<void> deleteChunks(String recordingId) async {
-    final transaction = await getTransaction(idbModeReadWrite);
-    final store = transaction.objectStore(storeName);
+    final transaction = await _getTransaction(idbModeReadWrite);
+    final store = transaction.objectStore(kChunksStoreName);
 
     final keysToDelete = await _getKeysToDelete(
       store: store,
@@ -81,5 +83,9 @@ class AudioChunksStorageService extends BaseStorageService {
     for (final key in keysToDelete) {
       await store.delete(key);
     }
+  }
+
+  Future<Transaction> _getTransaction(String mode) {
+    return DatabaseManager.instance.getTransaction(kChunksStoreName, mode);
   }
 }
