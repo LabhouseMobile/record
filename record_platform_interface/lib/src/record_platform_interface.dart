@@ -8,7 +8,9 @@ import 'types/types.dart';
 
 /// Record platform interface
 abstract class RecordPlatform extends PlatformInterface
-    implements RecordMethodChannelPlatformInterface, RecordEventChannelPlatformInterface {
+    implements
+        RecordMethodChannelPlatformInterface,
+        RecordEventChannelPlatformInterface {
   /// Constructs a RecordPlatformInterface.
   RecordPlatform() : super(token: _token);
 
@@ -34,7 +36,8 @@ abstract class RecordMethodChannelPlatformInterface {
   /// On `web`: This parameter is ignored.
   ///
   /// Output path can be retrieves when [stop] method is called.
-  Future<void> start(String recorderId, RecordConfig config, {required String path});
+  Future<void> start(String recorderId, RecordConfig config,
+      {required String path});
 
   /// Same as [start] with output stream instead of a path.
   ///
