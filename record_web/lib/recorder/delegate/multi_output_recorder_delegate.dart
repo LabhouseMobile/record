@@ -12,6 +12,7 @@ import 'package:record_web/recorder/delegate/recorder_delegate.dart';
 import 'package:record_web/recorder/recorder.dart';
 import 'package:record_web/services/audio_chunks_storage_service.dart';
 import 'package:record_web/services/metadata_storage_service.dart';
+import 'package:universal_html/html.dart' as html;
 import 'package:web/web.dart' as web;
 
 /// Web delegate that supports dual-output recording:
@@ -211,8 +212,8 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     final result = MultiOutputResult(
       m4aPath: null, // Don't return paths on web
       wavPath: null, // Don't return paths on web
-      m4aBlob: compressedBlob,
-      wavBlob: wavBlob,
+      m4aBlob: compressedBlob as html.Blob?,
+      wavBlob: wavBlob as html.Blob?,
       m4aError: compressedBlob == null ? 'Compressed branch not available' : null,
       wavError: wavBlob == null ? 'WAV encoding failed or no data' : null,
     );
