@@ -10,6 +10,7 @@ import 'package:record_web/encoder/wav_encoder.dart';
 import 'package:record_web/mime_types.dart';
 import 'package:record_web/recorder/delegate/recorder_delegate.dart';
 import 'package:record_web/recorder/recorder.dart';
+import 'package:universal_html/html.dart' as html;
 import 'package:web/web.dart' as web;
 
 /// Web delegate that supports dual-output recording:
@@ -235,7 +236,7 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     );
   }
 
-  Future<web.Blob?> _stopMediaRecorder() async {
+  Future<html.Blob?> _stopMediaRecorder() async {
     if (_mediaRecorder?.state != 'recording' && _mediaRecorder?.state != 'paused') {
       return null;
     }
@@ -254,12 +255,12 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     }
 
     if (_compressedChunks.isNotEmpty) {
-      return web.Blob(_compressedChunks.toJS);
+      return html.Blob(_compressedChunks.map((web.Blob chunk) => chunk as html.Blob).toList());
     }
     return null;
   }
 
-  Future<web.Blob?> _finalizeWavEncoder() async {
+  Future<html.Blob?> _finalizeWavEncoder() async {
     try {
       final wavBlob = _wavEncoder?.finish();
       _wavEncoder?.cleanup();

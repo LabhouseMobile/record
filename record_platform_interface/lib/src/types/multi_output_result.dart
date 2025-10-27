@@ -1,4 +1,4 @@
-import 'package:web/web.dart' as web;
+import 'package:universal_html/html.dart' as html;
 
 /// Result from a multi-output recording session.
 /// Contains paths and error information for each output destination.
@@ -16,10 +16,10 @@ class MultiOutputResult {
   final String? wavError;
 
   /// Blob for the M4A output file, or null if writing failed
-  final web.Blob? m4aBlob;
+  final html.Blob? m4aBlob;
 
   /// Blob for the WAV output file, or null if writing failed
-  final web.Blob? wavBlob;
+  final html.Blob? wavBlob;
 
   const MultiOutputResult({
     this.m4aPath,
@@ -63,8 +63,8 @@ class MultiOutputResult {
       wavPath: map['wavPath'] as String?,
       m4aError: map['m4aError'] as String?,
       wavError: map['wavError'] as String?,
-      m4aBlob: map['m4aBlob'] as web.Blob?,
-      wavBlob: map['wavBlob'] as web.Blob?,
+      m4aBlob: map['m4aBlob'] as html.Blob?,
+      wavBlob: map['wavBlob'] as html.Blob?,
     );
   }
 

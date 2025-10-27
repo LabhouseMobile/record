@@ -1,7 +1,6 @@
-import 'dart:js_interop';
 import 'dart:typed_data';
 
-import 'package:web/web.dart' as web;
+import 'package:universal_html/html.dart' as html;
 
 import 'encoder.dart';
 
@@ -21,7 +20,7 @@ class WavEncoder implements Encoder {
   }
 
   @override
-  web.Blob finish() {
+  html.Blob finish() {
     final dataSize = numChannels * _numSamples * 2;
     final view = ByteData(44);
 
@@ -41,9 +40,9 @@ class WavEncoder implements Encoder {
 
     _dataViews.insertAll(0, view.buffer.asUint8List());
 
-    final blob = web.Blob(
-        <JSUint8Array>[Uint8List.fromList(_dataViews).toJS].toJS,
-        web.BlobPropertyBag(type: 'audio/wav'));
+    final blob = html.Blob(
+        [Uint8List.fromList(_dataViews)],
+        'audio/wav');
 
     cleanup();
 
