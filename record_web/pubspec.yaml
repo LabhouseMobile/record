@@ -18,8 +18,11 @@ dependencies:
 
   web: ^1.0.0
   record_platform_interface: ^1.4.0
+  idb_shim: ^2.6.6
 
 dev_dependencies:
+  flutter_test:
+    sdk: flutter
   flutter_lints: ^5.0.0
 
 flutter:
@@ -27,8 +30,8 @@ flutter:
     platforms:
       web:
         pluginClass: RecordPluginWeb
-        fileName: 'record_web.dart'
-  
+        fileName: "record_web.dart"
+
   assets:
     - assets/js/record.worklet.js
     - assets/js/record.fixwebmduration.js
