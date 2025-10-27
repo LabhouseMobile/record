@@ -44,6 +44,7 @@ class WavEncoder implements Encoder {
     final blob = web.Blob(
         <JSUint8Array>[Uint8List.fromList(_dataViews).toJS].toJS,
         web.BlobPropertyBag(type: 'audio/wav'));
+    
     cleanup();
 
     return blob;
