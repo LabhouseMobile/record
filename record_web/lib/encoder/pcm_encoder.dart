@@ -1,6 +1,7 @@
+import 'dart:js_interop';
 import 'dart:typed_data';
 
-import 'package:universal_html/html.dart' as html;
+import 'package:web/web.dart' as web;
 
 import 'encoder.dart';
 
@@ -13,10 +14,10 @@ class PcmEncoder implements Encoder {
   }
 
   @override
-  html.Blob finish() {
-    final blob = html.Blob(
-      [Uint8List.fromList(_dataViews)],
-      'audio/pcm',
+  web.Blob finish() {
+    final blob = web.Blob(
+      <JSUint8Array>[Uint8List.fromList(_dataViews).toJS].toJS,
+      web.BlobPropertyBag(type: 'audio/pcm'),
     );
 
     cleanup();

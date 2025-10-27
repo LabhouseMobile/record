@@ -112,7 +112,7 @@ class MicRecorderDelegate extends RecorderDelegate {
 
     onStateChanged(RecordState.stop);
 
-    return blob != null ? web.URL.createObjectURL(blob as web.Blob) : null;
+    return blob != null ? web.URL.createObjectURL(blob) : null;
   }
 
   @override

@@ -158,8 +158,8 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     final result = MultiOutputResult(
       m4aPath: null, // Don't return paths on web
       wavPath: null, // Don't return paths on web
-      m4aBlob: compressedBlob,
-      wavBlob: wavBlob,
+      m4aBlob: compressedBlob as html.Blob?,
+      wavBlob: wavBlob as html.Blob?,
       m4aError: compressedBlob == null ? 'Compressed branch not available' : null,
       wavError: wavBlob == null ? 'WAV encoding failed or no data' : null,
     );
@@ -236,7 +236,7 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     );
   }
 
-  Future<html.Blob?> _stopMediaRecorder() async {
+  Future<web.Blob?> _stopMediaRecorder() async {
     if (_mediaRecorder?.state != 'recording' && _mediaRecorder?.state != 'paused') {
       return null;
     }
@@ -255,12 +255,12 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     }
 
     if (_compressedChunks.isNotEmpty) {
-      return html.Blob(_compressedChunks.map((web.Blob chunk) => chunk as html.Blob).toList());
+      return web.Blob(_compressedChunks.toJS);
     }
     return null;
   }
 
-  Future<html.Blob?> _finalizeWavEncoder() async {
+  Future<web.Blob?> _finalizeWavEncoder() async {
     try {
       final wavBlob = _wavEncoder?.finish();
       _wavEncoder?.cleanup();

@@ -1,11 +1,11 @@
 import 'dart:typed_data';
 
-import 'package:universal_html/html.dart' as html;
+import 'package:web/web.dart' as web;
 
 abstract class Encoder {
   void encode(Int16List buffer);
 
-  html.Blob finish();
+  web.Blob finish();
 
   void cleanup();
 }
