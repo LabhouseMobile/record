@@ -1,7 +1,7 @@
-import 'dart:js_interop';
 import 'dart:typed_data';
 
 import 'package:web/web.dart' as web;
+import 'dart:js_interop';
 
 import 'encoder.dart';
 
