@@ -447,20 +447,4 @@ class RecordLinux extends RecordPlatform {
     // This uses pipe() for proper backpressure handling
     _inputPcmController!.stream.pipe(_ffmpegProcess!.stdin);
   }
-
-  @override
-  Future<Uint8List?> recoverRecording(String path) {
-    throw UnimplementedError(
-      'recoverRecording() is only available on Web platform. '
-      'On Linux, recordings are stored in the filesystem.',
-    );
-  }
-
-  @override
-  Future<void> deleteRecording(String path) {
-    throw UnimplementedError(
-      'deleteRecording() is only available on Web platform. '
-      'On Linux, use standard file operations to delete recordings.',
-    );
-  }
 }
