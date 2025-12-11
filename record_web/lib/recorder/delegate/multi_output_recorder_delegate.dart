@@ -10,6 +10,9 @@ import 'package:record_web/encoder/wav_encoder.dart';
 import 'package:record_web/mime_types.dart';
 import 'package:record_web/recorder/delegate/recorder_delegate.dart';
 import 'package:record_web/recorder/recorder.dart';
+import 'package:record_web/services/audio_chunks_storage_service.dart';
+import 'package:record_web/services/metadata_storage_service.dart';
+import 'package:universal_html/html.dart' as html;
 import 'package:web/web.dart' as web;
 
 /// Web delegate that supports dual-output recording:
@@ -36,6 +39,14 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
   // Amplitude (computed from PCM frames)
   double _maxAmplitude = kMinAmplitude;
   double _amplitude = kMinAmplitude;
+
+  // Chunk counter for storage
+  int _pcmChunkCount = 0;
+
+  // Persistent storage for crash recovery
+  final _chunksService = AudioChunksStorageService();
+  final _metadataService = MetadataStorageService();
+  String? _currentRecordingId;
 
   MultiOutputRecorderDelegate({required this.onStateChanged});
 
@@ -117,6 +128,17 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
       );
     }
 
+    _currentRecordingId = basePath;
+
+    // Reset counter
+    _pcmChunkCount = 0;
+
+    _saveMetadataForRecovery(
+      recordingId: basePath,
+      sampleRate: config.sampleRate.toInt(),
+      numChannels: config.numChannels,
+    );
+
     await _recordStreamCtrl?.close();
     _recordStreamCtrl = StreamController<Uint8List>();
 
@@ -141,6 +163,24 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     return _recordStreamCtrl!.stream;
   }
 
+  void _saveMetadataForRecovery({
+    required String recordingId,
+    required int sampleRate,
+    required int numChannels,
+  }) {
+    _metadataService
+        .saveMetadata(
+      recordingId: recordingId,
+      sampleRate: sampleRate,
+      numChannels: numChannels,
+    )
+        .catchError((e) {
+      if (kDebugMode) {
+        print('[record_web] Error saving metadata: $e');
+      }
+    });
+  }
+
   @override
   Future<MultiOutputResult> stopDual() async {
     await resetContext(_context, _mediaStream);
@@ -154,11 +194,26 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
 
     _compressedChunks = [];
 
+    final currentRecordingId = _currentRecordingId;
+    if (currentRecordingId != null) {
+      _chunksService.deleteChunks(currentRecordingId).catchError((e) {
+        if (kDebugMode) {
+          print('[record_web] Error deleting stored chunks: $e');
+        }
+      });
+      _metadataService.deleteMetadata(currentRecordingId).catchError((e) {
+        if (kDebugMode) {
+          print('[record_web] Error deleting stored metadata: $e');
+        }
+      });
+      _currentRecordingId = null;
+    }
+
     final result = MultiOutputResult(
       m4aPath: null, // Don't return paths on web
       wavPath: null, // Don't return paths on web
-      m4aBlob: compressedBlob,
-      wavBlob: wavBlob,
+      m4aBlob: compressedBlob as html.Blob?,
+      wavBlob: wavBlob as html.Blob?,
       m4aError: compressedBlob == null ? 'Compressed branch not available' : null,
       wavError: wavBlob == null ? 'WAV encoding failed or no data' : null,
     );
@@ -212,7 +267,37 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
       // Feed WAV encoder with PCM samples
       _wavEncoder?.encode(audioSamples);
       _updateAmplitude(audioSamples);
+
+      _pcmChunkCount++;
+      _saveChunkToStorage(
+        chunkIndex: _pcmChunkCount,
+        chunkData: audioBytes,
+        chunkType: 'PCM',
+      );
     }
+  }
+
+  void _saveChunkToStorage({
+    required int chunkIndex,
+    required Uint8List chunkData,
+    required String chunkType,
+  }) {
+    final recordingId = _currentRecordingId;
+    if (recordingId == null) {
+      throw StateError('Recording ID is null during PCM recording');
+    }
+
+    _chunksService
+        .saveChunk(
+      recordingId: recordingId,
+      chunkIndex: chunkIndex,
+      chunkData: chunkData,
+    )
+        .catchError((e) {
+      if (kDebugMode) {
+        print('[record_web] Error saving $chunkType chunk: $e');
+      }
+    });
   }
 
   void _onCompressedData(web.BlobEvent event) {

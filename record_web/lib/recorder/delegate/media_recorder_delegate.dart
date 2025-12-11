@@ -1,15 +1,15 @@
 import 'dart:async';
 import 'dart:js_interop';
 import 'dart:math' as math;
+import 'package:record_web/js/js_import_library.dart';
+import 'package:record_web/js/js_webm_duration_fix.dart';
+import 'package:web/web.dart' as web;
 
 import 'package:flutter/foundation.dart';
 import 'package:record_platform_interface/record_platform_interface.dart';
-import 'package:record_web/js/js_import_library.dart';
-import 'package:record_web/js/js_webm_duration_fix.dart';
 import 'package:record_web/mime_types.dart';
 import 'package:record_web/recorder/delegate/recorder_delegate.dart';
 import 'package:record_web/recorder/recorder.dart';
-import 'package:web/web.dart' as web;
 
 class MediaRecorderDelegate extends RecorderDelegate {
   // Media recorder object
@@ -118,7 +118,8 @@ class MediaRecorderDelegate extends RecorderDelegate {
           mimeType: mimeType,
         ),
       );
-      mediaRecorder.ondataavailable = ((web.BlobEvent event) => _onDataAvailable(event)).toJS;
+      mediaRecorder.ondataavailable =
+          ((web.BlobEvent event) => _onDataAvailable(event)).toJS;
       mediaRecorder.onstop = ((web.Event event) => _onStop()).toJS;
 
       _elapsedTime.start();
@@ -288,6 +289,8 @@ class MediaRecorderDelegate extends RecorderDelegate {
 
     analyser.getFloatFrequencyData(jsArray);
 
-    return jsArray.toDart.reduce((value, element) => math.max(value, element)).toDouble();
+    return jsArray.toDart
+        .reduce((value, element) => math.max(value, element))
+        .toDouble();
   }
 }
