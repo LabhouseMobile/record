@@ -167,6 +167,44 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     return result;
   }
 
+  @override
+  Future<void> cancel() async {
+    // Close the stream controller without finishing
+    await _recordStreamCtrl?.close();
+    _recordStreamCtrl = null;
+
+    // Reset audio context and media stream
+    await resetContext(_context, _mediaStream);
+    _mediaStream = null;
+    _context = null;
+    _workletNode = null;
+    _source = null;
+
+    // Stop media recorder without waiting for data
+    _cancelMediaRecorder();
+
+    // Cleanup WAV encoder without finalizing
+    _wavEncoder?.cleanup();
+    _wavEncoder = null;
+
+    // Clear compressed chunks
+    _compressedChunks = [];
+
+    // Reset amplitude
+    _maxAmplitude = kMinAmplitude;
+    _amplitude = kMinAmplitude;
+
+    onStateChanged(RecordState.stop);
+  }
+
+  void _cancelMediaRecorder() {
+    final mediaRecorder = _mediaRecorder;
+    if (mediaRecorder != null && (mediaRecorder.state == 'recording' || mediaRecorder.state == 'paused')) {
+      mediaRecorder.stop();
+    }
+    _mediaRecorder = null;
+  }
+
   void _onPcmMessage(web.MessageEvent event) {
     final pcmData = (event.data as JSInt16Array?)?.toDart;
     if (pcmData case final audioSamples?) {

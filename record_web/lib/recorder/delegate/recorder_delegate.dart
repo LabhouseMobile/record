@@ -42,6 +42,8 @@ abstract class RecorderDelegate {
 
   Future<MultiOutputResult> stopDual();
 
+  Future<void> cancel();
+
   Future<web.MediaStream> initMediaStream(
     RecordConfig config,
   ) async {

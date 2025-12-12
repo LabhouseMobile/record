@@ -167,6 +167,15 @@ class MediaRecorderDelegate extends RecorderDelegate {
   }
 
   @override
+  Future<void> cancel() async {
+    if (_isRecording()) {
+      _mediaRecorder?.stop();
+    }
+    await _reset();
+    onStateChanged(RecordState.stop);
+  }
+
+  @override
   Future<Amplitude> getAmplitude() async {
     try {
       final amp = _getMaxAmplitude().clamp(kMinAmplitude, kMaxAmplitude);

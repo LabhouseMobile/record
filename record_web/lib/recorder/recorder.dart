@@ -192,11 +192,13 @@ class Recorder {
   }
 
   Future<void> cancel() async {
-    final url = await stop();
+    final delegate = _delegate;
 
-    if (url != null) {
-      web.URL.revokeObjectURL(url);
+    if (delegate == null) {
+      return;
     }
+
+    return delegate.cancel();
   }
 
   Stream<RecordState> onStateChanged() {

@@ -120,6 +120,12 @@ class MicRecorderDelegate extends RecorderDelegate {
     throw UnimplementedError();
   }
 
+  @override
+  Future<void> cancel() async {
+    await _reset();
+    onStateChanged(RecordState.stop);
+  }
+
   Future<void> _start(RecordConfig config, {bool isStream = false}) async {
     final mediaStream = await initMediaStream(config);
 
