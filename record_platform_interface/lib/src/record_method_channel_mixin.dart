@@ -161,22 +161,6 @@ mixin RecordMethodChannel implements RecordMethodChannelPlatformInterface {
   }
 
   @override
-  Future<Uint8List?> recoverRecording(String path) {
-    throw UnimplementedError(
-      'recoverRecording() is only available on Web platform. '
-      'On mobile platforms, recordings are stored in the filesystem.',
-    );
-  }
-
-  @override
-  Future<void> deleteRecording(String path) {
-    throw UnimplementedError(
-      'deleteRecording() is only available on Web platform. '
-      'On mobile platforms, recordings are stored in the filesystem.',
-    );
-  }
-
-  @override
   Future<bool> isEncoderSupported(
     String recorderId,
     AudioEncoder encoder,

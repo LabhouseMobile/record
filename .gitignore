@@ -30,7 +30,6 @@ pubspec.lock
 migrate_working_dir/
 .DS_Store
 .cxx/
-.vscode/settings.json
 
 # melos
 pubspec_overrides.yaml

@@ -110,23 +110,6 @@ abstract class RecordMethodChannelPlatformInterface {
   ///
   /// Returns [null] when not on iOS platform.
   RecordIos? getIos(String recorderId);
-
-  /// Recovers a recording from persistent storage (Web only).
-  ///
-  /// On Web, returns the complete WAV file as bytes reconstructed from IndexedDB.
-  /// On other platforms, throws [UnimplementedError] as recordings are stored in the filesystem.
-  ///
-  /// This is useful for crash recovery on Web - if the app crashed during recording,
-  /// you can recover the audio that was saved to IndexedDB.
-  Future<Uint8List?> recoverRecording(String path);
-
-  /// Deletes a recording from persistent storage (Web only).
-  ///
-  /// Use this to clean up stored chunks after successful recovery
-  /// or if the user chooses to discard the pending recording.
-  ///
-  /// On other platforms, throws [UnimplementedError] as this is web-specific functionality.
-  Future<void> deleteRecording(String path);
 }
 
 /// Record event channel platform interface
