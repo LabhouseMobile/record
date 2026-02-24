@@ -10,6 +10,8 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
   private var audioEngine: AVAudioEngine?
   private var amplitude: Float = -160.0
   private let bus = 0
+  private var pcmFormat: AVAudioFormat?
+  private var recordEventHandler: RecordStreamHandler?
   private var onPause: () -> ()
   private var onStop: () -> ()
   private let manageAudioSession: Bool
@@ -40,7 +42,7 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
     let srcFormat = audioEngine.inputNode.inputFormat(forBus: 0)
     
     // Interleaved PCM for streaming and output writers
-    guard let pcmFormat = AVAudioFormat(
+    guard let pcm = AVAudioFormat(
       commonFormat: .pcmFormatInt16,
       sampleRate: Double(config.sampleRate),
       channels: AVAudioChannelCount(config.numChannels),
@@ -51,8 +53,10 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
         details: "Unsupported PCM format"
       )
     }
+    self.pcmFormat = pcm
+    self.recordEventHandler = recordEventHandler
     
-    guard let converter = AVAudioConverter(from: srcFormat, to: pcmFormat) else {
+    guard let converter = AVAudioConverter(from: srcFormat, to: pcm) else {
       throw RecorderError.error(
         message: "Failed to start recording",
         details: "PCM conversion is not possible."
@@ -63,7 +67,7 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
     // Initialize all output writers
     for writer in outputWriters {
       do {
-        try writer.start(pcmFormat: pcmFormat)
+        try writer.start(pcmFormat: pcm)
       } catch {
         // Writers track their own errors, continue with others
       }
@@ -76,7 +80,7 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
     ) { (buffer, _) -> Void in
       self.processPCMBuffer(
         buffer: buffer,
-        pcmFormat: pcmFormat,
+        pcmFormat: pcm,
         converter: converter,
         recordEventHandler: recordEventHandler
       )
@@ -174,6 +178,8 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
     }
     
     config = nil
+    pcmFormat = nil
+    recordEventHandler = nil
   }
   
   /// Get results from all output writers
@@ -318,16 +324,50 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
     }
   }
   
+  /// Full pipeline reconfigure for route changes (e.g. Bluetooth connect/disconnect).
+  /// Input format changes with the route, so we must remove the old tap, create a new
+  /// converter for the new source format, install a new tap, then start.
+  private func reconfigurePipeline() throws {
+    guard let engine = audioEngine,
+          let config = config,
+          let pcm = pcmFormat,
+          let handler = recordEventHandler else {
+      throw RecorderError.error(message: "Reconfigure failed", details: "Missing engine, config, or pipeline state")
+    }
+
+    engine.inputNode.removeTap(onBus: bus)
+    let newSrcFormat = engine.inputNode.inputFormat(forBus: 0)
+    guard let converter = AVAudioConverter(from: newSrcFormat, to: pcm) else {
+      throw RecorderError.error(message: "Reconfigure failed", details: "PCM conversion not possible for new input format")
+    }
+    converter.sampleRateConverterQuality = AVAudioQuality.high.rawValue
+
+    engine.inputNode.installTap(
+      onBus: bus,
+      bufferSize: AVAudioFrameCount(config.streamBufferSize ?? 1024),
+      format: newSrcFormat
+    ) { (buffer, _) -> Void in
+      self.processPCMBuffer(
+        buffer: buffer,
+        pcmFormat: pcm,
+        converter: converter,
+        recordEventHandler: handler
+      )
+    }
+
+    engine.prepare()
+    try engine.start()
+  }
+
   private func attemptRestartAfterConfigChange(retryCount: Int, maxRetries: Int) {
     guard let engine = audioEngine, engine.isRunning == false else {
       isRestartPending = false
       return
     }
-    
+
     do {
       try AVAudioSession.sharedInstance().setActive(true)
-      engine.prepare()
-      try engine.start()
+      try reconfigurePipeline()
       NSLog("[Record] Successfully restarted audio engine after configuration change (\(retryCount) retries)")
       isRestartPending = false
     } catch {
