@@ -340,6 +340,7 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
         NSLog("[Record] Successfully restarted audio engine after route change")
       } catch {
         NSLog("[Record] Failed to restart audio engine after route change: \(error.localizedDescription)")
+        stop { path in }
       }
     }
   }
