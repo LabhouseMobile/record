@@ -15,6 +15,7 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
   private let manageAudioSession: Bool
   private var isResuming = false
   private var isInterrupted = false
+  private var isRestartPending = false
   private let outputWriters: [AudioOutputWriter]
   private var currentFramePosition: Int64 = 0
   
@@ -299,20 +300,49 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
       return
     }
     
+    guard !isRestartPending else {
+      NSLog("[Record] Restart already in progress, skipping")
+      return
+    }
+    
     guard let engine = audioEngine, !engine.isRunning else {
       return
     }
     
     NSLog("[Record] Audio engine stopped after configuration change, attempting restart...")
+    isRestartPending = true
     
-    // Engine stopped, try to restart it
+    // 100ms initial delay to let the route change settle (matches interruption handler)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+      self?.attemptRestartAfterConfigChange(retryCount: 0, maxRetries: 3)
+    }
+  }
+  
+  private func attemptRestartAfterConfigChange(retryCount: Int, maxRetries: Int) {
+    guard let engine = audioEngine, engine.isRunning == false else {
+      isRestartPending = false
+      return
+    }
+    
     do {
+      try AVAudioSession.sharedInstance().setActive(true)
       engine.prepare()
       try engine.start()
-      NSLog("[Record] Successfully restarted audio engine after configuration change")
+      NSLog("[Record] Successfully restarted audio engine after configuration change (\(retryCount) retries)")
+      isRestartPending = false
     } catch {
-      NSLog("[Record] Failed to restart audio engine: \(error.localizedDescription)")
-      stop { path in }
+      let nextRetry = retryCount + 1
+      if nextRetry < maxRetries {
+        let delay = 0.2 * pow(2.0, Double(retryCount))
+        NSLog("[Record] Restart attempt \(nextRetry) failed, retrying in \(delay)s: \(error.localizedDescription)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+          self?.attemptRestartAfterConfigChange(retryCount: nextRetry, maxRetries: maxRetries)
+        }
+      } else {
+        NSLog("[Record] Unable to restart after \(maxRetries) attempts: \(error.localizedDescription)")
+        isRestartPending = false
+        stop { _ in }
+      }
     }
   }
   
@@ -323,26 +353,10 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
       return
     }
     
-    NSLog("[Record] Audio route changed: reason=\(reason.rawValue), interrupted=\(isInterrupted), resuming=\(isResuming)")
+    NSLog("[Record] Audio route changed: reason=\(reason.rawValue), interrupted=\(isInterrupted)")
     
-    // Don't try to restart during an active interruption
-    guard !isInterrupted else {
-      NSLog("[Record] Skipping route change handling during interruption")
-      return
-    }
-    
-    // Only restart if we're resuming and the route change caused the engine to stop
-    if isResuming, let engine = audioEngine, !engine.isRunning {
-      NSLog("[Record] Audio engine stopped due to route change during resume, attempting restart...")
-      do {
-        engine.prepare()
-        try engine.start()
-        NSLog("[Record] Successfully restarted audio engine after route change")
-      } catch {
-        NSLog("[Record] Failed to restart audio engine after route change: \(error.localizedDescription)")
-        stop { path in }
-      }
-    }
+    // Purely informational: handleConfigurationChange always fires on the same event
+    // and now handles restart with setActive + delay + retries. No restart logic here.
   }
   
   @objc private func handleMediaServicesReset(notification: Notification) {
