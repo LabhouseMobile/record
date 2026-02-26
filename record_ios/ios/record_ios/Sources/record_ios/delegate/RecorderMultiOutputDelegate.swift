@@ -297,30 +297,36 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
   }
   
   @objc private func handleConfigurationChange(notification: Notification) {
-    NSLog("[Record] Audio engine configuration changed, interrupted=\(isInterrupted)")
-    
-    // Don't try to restart during an active interruption (phone call, etc.)
-    // The interruption end handler will take care of resuming
-    guard !isInterrupted else {
-      NSLog("[Record] Skipping restart during interruption")
-      return
-    }
-    
-    guard !isRestartPending else {
-      NSLog("[Record] Restart already in progress, skipping")
-      return
-    }
-    
-    guard let engine = audioEngine, !engine.isRunning else {
-      return
-    }
-    
-    NSLog("[Record] Audio engine stopped after configuration change, attempting restart...")
-    isRestartPending = true
-    
-    // 100ms initial delay to let the route change settle (matches interruption handler)
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-      self?.attemptRestartAfterConfigChange(retryCount: 0, maxRetries: 3)
+    // NotificationCenter selectors run on the posting thread. Serialize all
+    // restart-state reads/writes onto the main queue to avoid data races with
+    // attemptRestartAfterConfigChange retry callbacks.
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else { return }
+      NSLog("[Record] Audio engine configuration changed, interrupted=\(self.isInterrupted)")
+      
+      // Don't try to restart during an active interruption (phone call, etc.)
+      // The interruption end handler will take care of resuming
+      guard !self.isInterrupted else {
+        NSLog("[Record] Skipping restart during interruption")
+        return
+      }
+      
+      guard !self.isRestartPending else {
+        NSLog("[Record] Restart already in progress, skipping")
+        return
+      }
+      
+      guard let engine = self.audioEngine, !engine.isRunning else {
+        return
+      }
+      
+      NSLog("[Record] Audio engine stopped after configuration change, attempting restart...")
+      self.isRestartPending = true
+      
+      // 100ms initial delay to let the route change settle (matches interruption handler)
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+        self?.attemptRestartAfterConfigChange(retryCount: 0, maxRetries: 3)
+      }
     }
   }
   
@@ -366,7 +372,9 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
     }
 
     do {
-      try AVAudioSession.sharedInstance().setActive(true)
+      if manageAudioSession {
+        try AVAudioSession.sharedInstance().setActive(true)
+      }
       try reconfigurePipeline()
       NSLog("[Record] Successfully restarted audio engine after configuration change (\(retryCount) retries)")
       isRestartPending = false
