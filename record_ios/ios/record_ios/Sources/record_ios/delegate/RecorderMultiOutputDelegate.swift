@@ -90,11 +90,9 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
     try audioEngine.start()
     
     self.audioEngine = audioEngine
-    
-    // Add observers for audio engine configuration changes
-    setupAudioEngineObservers()
-    
     self.config = config
+    
+    setupAudioEngineObservers()
   }
   
   private func processPCMBuffer(
