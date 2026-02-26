@@ -10,11 +10,14 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
   private var audioEngine: AVAudioEngine?
   private var amplitude: Float = -160.0
   private let bus = 0
+  private var pcmFormat: AVAudioFormat?
+  private var recordEventHandler: RecordStreamHandler?
   private var onPause: () -> ()
   private var onStop: () -> ()
   private let manageAudioSession: Bool
   private var isResuming = false
   private var isInterrupted = false
+  private var isRestartPending = false
   private let outputWriters: [AudioOutputWriter]
   private var currentFramePosition: Int64 = 0
   
@@ -39,7 +42,7 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
     let srcFormat = audioEngine.inputNode.inputFormat(forBus: 0)
     
     // Interleaved PCM for streaming and output writers
-    guard let pcmFormat = AVAudioFormat(
+    guard let pcm = AVAudioFormat(
       commonFormat: .pcmFormatInt16,
       sampleRate: Double(config.sampleRate),
       channels: AVAudioChannelCount(config.numChannels),
@@ -50,8 +53,10 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
         details: "Unsupported PCM format"
       )
     }
+    self.pcmFormat = pcm
+    self.recordEventHandler = recordEventHandler
     
-    guard let converter = AVAudioConverter(from: srcFormat, to: pcmFormat) else {
+    guard let converter = AVAudioConverter(from: srcFormat, to: pcm) else {
       throw RecorderError.error(
         message: "Failed to start recording",
         details: "PCM conversion is not possible."
@@ -62,7 +67,7 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
     // Initialize all output writers
     for writer in outputWriters {
       do {
-        try writer.start(pcmFormat: pcmFormat)
+        try writer.start(pcmFormat: pcm)
       } catch {
         // Writers track their own errors, continue with others
       }
@@ -75,7 +80,7 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
     ) { (buffer, _) -> Void in
       self.processPCMBuffer(
         buffer: buffer,
-        pcmFormat: pcmFormat,
+        pcmFormat: pcm,
         converter: converter,
         recordEventHandler: recordEventHandler
       )
@@ -85,11 +90,9 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
     try audioEngine.start()
     
     self.audioEngine = audioEngine
-    
-    // Add observers for audio engine configuration changes
-    setupAudioEngineObservers()
-    
     self.config = config
+    
+    setupAudioEngineObservers()
   }
   
   private func processPCMBuffer(
@@ -173,6 +176,8 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
     }
     
     config = nil
+    pcmFormat = nil
+    recordEventHandler = nil
   }
   
   /// Get results from all output writers
@@ -290,29 +295,100 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
   }
   
   @objc private func handleConfigurationChange(notification: Notification) {
-    NSLog("[Record] Audio engine configuration changed, interrupted=\(isInterrupted)")
-    
-    // Don't try to restart during an active interruption (phone call, etc.)
-    // The interruption end handler will take care of resuming
-    guard !isInterrupted else {
-      NSLog("[Record] Skipping restart during interruption")
+    // NotificationCenter selectors run on the posting thread. Serialize all
+    // restart-state reads/writes onto the main queue to avoid data races with
+    // attemptRestartAfterConfigChange retry callbacks.
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else { return }
+      NSLog("[Record] Audio engine configuration changed, interrupted=\(self.isInterrupted)")
+      
+      // Don't try to restart during an active interruption (phone call, etc.)
+      // The interruption end handler will take care of resuming
+      guard !self.isInterrupted else {
+        NSLog("[Record] Skipping restart during interruption")
+        return
+      }
+      
+      guard !self.isRestartPending else {
+        NSLog("[Record] Restart already in progress, skipping")
+        return
+      }
+      
+      guard let engine = self.audioEngine, !engine.isRunning else {
+        return
+      }
+      
+      NSLog("[Record] Audio engine stopped after configuration change, attempting restart...")
+      self.isRestartPending = true
+      
+      // 100ms initial delay to let the route change settle (matches interruption handler)
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+        self?.attemptRestartAfterConfigChange(retryCount: 0, maxRetries: 3)
+      }
+    }
+  }
+  
+  /// Full pipeline reconfigure for route changes (e.g. Bluetooth connect/disconnect).
+  /// Input format changes with the route, so we must remove the old tap, create a new
+  /// converter for the new source format, install a new tap, then start.
+  private func reconfigurePipeline() throws {
+    guard let engine = audioEngine,
+          let config = config,
+          let pcm = pcmFormat,
+          let handler = recordEventHandler else {
+      throw RecorderError.error(message: "Reconfigure failed", details: "Missing engine, config, or pipeline state")
+    }
+
+    engine.inputNode.removeTap(onBus: bus)
+    let newSrcFormat = engine.inputNode.inputFormat(forBus: 0)
+    guard let converter = AVAudioConverter(from: newSrcFormat, to: pcm) else {
+      throw RecorderError.error(message: "Reconfigure failed", details: "PCM conversion not possible for new input format")
+    }
+    converter.sampleRateConverterQuality = AVAudioQuality.high.rawValue
+
+    engine.inputNode.installTap(
+      onBus: bus,
+      bufferSize: AVAudioFrameCount(config.streamBufferSize ?? 1024),
+      format: newSrcFormat
+    ) { (buffer, _) -> Void in
+      self.processPCMBuffer(
+        buffer: buffer,
+        pcmFormat: pcm,
+        converter: converter,
+        recordEventHandler: handler
+      )
+    }
+
+    engine.prepare()
+    try engine.start()
+  }
+
+  private func attemptRestartAfterConfigChange(retryCount: Int, maxRetries: Int) {
+    guard let engine = audioEngine, engine.isRunning == false else {
+      isRestartPending = false
       return
     }
-    
-    guard let engine = audioEngine, !engine.isRunning else {
-      return
-    }
-    
-    NSLog("[Record] Audio engine stopped after configuration change, attempting restart...")
-    
-    // Engine stopped, try to restart it
+
     do {
-      engine.prepare()
-      try engine.start()
-      NSLog("[Record] Successfully restarted audio engine after configuration change")
+      if manageAudioSession {
+        try AVAudioSession.sharedInstance().setActive(true)
+      }
+      try reconfigurePipeline()
+      NSLog("[Record] Successfully restarted audio engine after configuration change (\(retryCount) retries)")
+      isRestartPending = false
     } catch {
-      NSLog("[Record] Failed to restart audio engine: \(error.localizedDescription)")
-      stop { path in }
+      let nextRetry = retryCount + 1
+      if nextRetry < maxRetries {
+        let delay = 0.2 * pow(2.0, Double(retryCount))
+        NSLog("[Record] Restart attempt \(nextRetry) failed, retrying in \(delay)s: \(error.localizedDescription)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+          self?.attemptRestartAfterConfigChange(retryCount: nextRetry, maxRetries: maxRetries)
+        }
+      } else {
+        NSLog("[Record] Unable to restart after \(maxRetries) attempts: \(error.localizedDescription)")
+        isRestartPending = false
+        stop { _ in }
+      }
     }
   }
   
@@ -323,25 +399,10 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
       return
     }
     
-    NSLog("[Record] Audio route changed: reason=\(reason.rawValue), interrupted=\(isInterrupted), resuming=\(isResuming)")
+    NSLog("[Record] Audio route changed: reason=\(reason.rawValue), interrupted=\(isInterrupted)")
     
-    // Don't try to restart during an active interruption
-    guard !isInterrupted else {
-      NSLog("[Record] Skipping route change handling during interruption")
-      return
-    }
-    
-    // Only restart if we're resuming and the route change caused the engine to stop
-    if isResuming, let engine = audioEngine, !engine.isRunning {
-      NSLog("[Record] Audio engine stopped due to route change during resume, attempting restart...")
-      do {
-        engine.prepare()
-        try engine.start()
-        NSLog("[Record] Successfully restarted audio engine after route change")
-      } catch {
-        NSLog("[Record] Failed to restart audio engine after route change: \(error.localizedDescription)")
-      }
-    }
+    // Purely informational: handleConfigurationChange always fires on the same event
+    // and now handles restart with setActive + delay + retries. No restart logic here.
   }
   
   @objc private func handleMediaServicesReset(notification: Notification) {
