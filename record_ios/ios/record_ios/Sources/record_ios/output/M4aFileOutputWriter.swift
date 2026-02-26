@@ -3,13 +3,17 @@ import CoreMedia
 import Foundation
 
 /// Output writer that encodes PCM audio to M4A/AAC format.
+/// Uses a queue-and-drain pattern to avoid dropping frames when the AAC encoder
+/// buffer is full (isReadyForMoreMediaData == false), e.g. under CPU/memory pressure.
 class M4aFileOutputWriter: AudioOutputWriter {
   private let outputPath: String
   private var writer: AVAssetWriter?
   private var input: AVAssetWriterInput?
   private var errorMessage: String?
   private var pcmFormat: AVAudioFormat?
-  
+  private let drainQueue = DispatchQueue(label: "M4aFileOutputWriter.drain")
+  private var pendingSampleBuffers: [CMSampleBuffer] = []
+
   init(outputPath: String) {
     self.outputPath = outputPath
   }
@@ -81,53 +85,87 @@ class M4aFileOutputWriter: AudioOutputWriter {
           let input = input,
           let writer = writer,
           let pcmFormat = pcmFormat else { return }
-    
-    guard input.isReadyForMoreMediaData else { return }
-    
+
     let pts = CMTimeMake(value: framePosition, timescale: Int32(pcmFormat.sampleRate))
-    
+
     guard let sampleBuffer = buffer.toCMSampleBuffer(presentationTime: pts) else {
       if errorMessage == nil {
         errorMessage = "Failed to create CMSampleBuffer"
       }
       return
     }
-    
-    let success = input.append(sampleBuffer)
-    if !success {
-      if writer.status == .failed {
-        errorMessage = writer.error?.localizedDescription ?? "Writer failed"
-      } else if errorMessage == nil {
-        errorMessage = "Failed to append sample buffer"
+
+    drainQueue.async { [weak self] in
+      self?.enqueueAndDrain(sampleBuffer: sampleBuffer)
+    }
+  }
+
+  private func enqueueAndDrain(sampleBuffer: CMSampleBuffer) {
+    guard errorMessage == nil,
+          let input = input,
+          let writer = writer else { return }
+
+    pendingSampleBuffers.append(sampleBuffer)
+    drainPendingBuffers()
+  }
+
+  private func drainPendingBuffers() {
+    guard errorMessage == nil,
+          let input = input,
+          let writer = writer else { return }
+
+    while !pendingSampleBuffers.isEmpty && input.isReadyForMoreMediaData && writer.status != .failed {
+      let sampleBuffer = pendingSampleBuffers.removeFirst()
+      let success = input.append(sampleBuffer)
+      if !success {
+        if writer.status == .failed {
+          errorMessage = writer.error?.localizedDescription ?? "Writer failed"
+        } else if errorMessage == nil {
+          errorMessage = "Failed to append sample buffer"
+        }
+        pendingSampleBuffers.insert(sampleBuffer, at: 0)
+        return
       }
     }
   }
   
   func stop(completion: @escaping () -> Void) {
-    guard let writer = writer, let input = input else {
+    guard writer != nil, input != nil else {
       completion()
       return
     }
-    
-    input.markAsFinished()
-    writer.finishWriting { [weak self] in
-      guard let self = self else {
+
+    drainQueue.async { [weak self] in
+      guard let self = self,
+            let writer = self.writer,
+            let input = self.input else {
         completion()
         return
       }
-      
-      if writer.status == .failed {
-        self.errorMessage = writer.error?.localizedDescription ?? "Unknown error"
+
+      self.drainPendingBuffers()
+      input.markAsFinished()
+      writer.finishWriting { [weak self] in
+        guard let self = self else {
+          completion()
+          return
+        }
+        if writer.status == .failed {
+          self.errorMessage = writer.error?.localizedDescription ?? "Unknown error"
+        }
+        self.pendingSampleBuffers.removeAll()
+        completion()
       }
-      
-      completion()
     }
   }
   
   func release() {
-    writer = nil
-    input = nil
-    pcmFormat = nil
+    drainQueue.sync {
+      writer = nil
+      input = nil
+      pcmFormat = nil
+      pendingSampleBuffers.removeAll()
+    }
   }
   
   func getOutputPath() -> String? {
