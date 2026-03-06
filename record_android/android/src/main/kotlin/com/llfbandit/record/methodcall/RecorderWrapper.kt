@@ -72,7 +72,8 @@ class RecorderWrapper(
     val m4aConfig = RecordConfig(
       path = config.path, // M4A path
       encoder = "aacLc", // Force AAC encoding as string
-      bitRate = config.bitRate,
+      bitRate = config.bitRateOutput ?: config.bitRate,
+      bitRateOutput = config.bitRateOutput,
       sampleRate = config.sampleRate,
       numChannels = config.numChannels,
       device = config.device,
