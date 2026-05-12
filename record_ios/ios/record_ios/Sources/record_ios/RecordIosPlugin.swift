@@ -18,9 +18,16 @@ public class RecordIosPlugin: NSObject, FlutterPlugin {
   
   // MARK: Plugin
   private var m_binaryMessenger: FlutterBinaryMessenger
-  
+
   private var m_recorders = [String: Recorder]()
-  
+
+  // Serial background queue used to run start/stop work off the iOS main thread.
+  // AVAudioSession.setActive, AVAudioEngine.start, AVAssetWriter setup, etc. perform
+  // synchronous IPC with the audio server and can block for hundreds of ms. Keeping
+  // them off the platform thread prevents the Flutter engine from missing frames.
+  // The queue must be serial so consecutive start/stop calls preserve their order.
+  private let m_workQueue = DispatchQueue(label: "com.llfbandit.record.work", qos: .userInitiated)
+
   init(binaryMessenger: FlutterBinaryMessenger) {
     self.m_binaryMessenger = binaryMessenger
   }
@@ -70,31 +77,43 @@ public class RecordIosPlugin: NSObject, FlutterPlugin {
         result(FlutterError(code: "record", message: "Call missing mandatory parameter path.", details: nil))
         return
       }
-      
+
       guard let config = getConfig(args, result: result) else {
         return
       }
-      
-      do {
-        try recorder.start(config: config, path: path)
-        result(nil)
-      } catch RecorderError.error(let message, let details) {
-        result(FlutterError(code: "record", message: message, details: details))
-      } catch {
-        result(FlutterError(code: "record", message: error.localizedDescription, details: nil))
+
+      m_workQueue.async {
+        do {
+          try recorder.start(config: config, path: path)
+          DispatchQueue.main.async { result(nil) }
+        } catch RecorderError.error(let message, let details) {
+          DispatchQueue.main.async {
+            result(FlutterError(code: "record", message: message, details: details))
+          }
+        } catch {
+          DispatchQueue.main.async {
+            result(FlutterError(code: "record", message: error.localizedDescription, details: nil))
+          }
+        }
       }
     case "startStream":
       guard let config = getConfig(args, result: result) else {
         return
       }
 
-      do {
-        try recorder.startStream(config: config)
-        result(nil)
-      } catch RecorderError.error(let message, let details) {
-        result(FlutterError(code: "record", message: message, details: details))
-      } catch {
-        result(FlutterError(code: "record", message: error.localizedDescription, details: nil))
+      m_workQueue.async {
+        do {
+          try recorder.startStream(config: config)
+          DispatchQueue.main.async { result(nil) }
+        } catch RecorderError.error(let message, let details) {
+          DispatchQueue.main.async {
+            result(FlutterError(code: "record", message: message, details: details))
+          }
+        } catch {
+          DispatchQueue.main.async {
+            result(FlutterError(code: "record", message: error.localizedDescription, details: nil))
+          }
+        }
       }
     case "startStreamDual":
       guard let config = getConfig(args, result: result) else {
@@ -105,28 +124,42 @@ public class RecordIosPlugin: NSObject, FlutterPlugin {
         return
       }
 
-      do {
-        try recorder.startStreamDual(config: config, basePath: basePath)
-        result(nil)
-      } catch RecorderError.error(let message, let details) {
-        result(FlutterError(code: "record", message: message, details: details))
-      } catch {
-        result(FlutterError(code: "record", message: error.localizedDescription, details: nil))
+      m_workQueue.async {
+        do {
+          try recorder.startStreamDual(config: config, basePath: basePath)
+          DispatchQueue.main.async { result(nil) }
+        } catch RecorderError.error(let message, let details) {
+          DispatchQueue.main.async {
+            result(FlutterError(code: "record", message: message, details: details))
+          }
+        } catch {
+          DispatchQueue.main.async {
+            result(FlutterError(code: "record", message: error.localizedDescription, details: nil))
+          }
+        }
       }
     case "stop":
-      recorder.stop { path in
-        result(path)
+      m_workQueue.async {
+        recorder.stop { path in
+          DispatchQueue.main.async { result(path) }
+        }
       }
     case "stopDual":
-      recorder.stopDual { map in
-        result(map)
+      m_workQueue.async {
+        recorder.stopDual { map in
+          DispatchQueue.main.async { result(map) }
+        }
       }
     case "cancel":
-      do {
-        try recorder.cancel()
-        result(nil)
-      } catch {
-        result(FlutterError(code: "record", message: error.localizedDescription, details: nil))
+      m_workQueue.async {
+        do {
+          try recorder.cancel()
+          DispatchQueue.main.async { result(nil) }
+        } catch {
+          DispatchQueue.main.async {
+            result(FlutterError(code: "record", message: error.localizedDescription, details: nil))
+          }
+        }
       }
     case "pause":
       recorder.pause()
@@ -180,14 +213,18 @@ public class RecordIosPlugin: NSObject, FlutterPlugin {
         result(FlutterError(code: "record", message: "Failed to parse sessionActive from Flutter.", details: nil))
         return
       }
-      
-      do {
-        try recorder.setAudioSessionActive(active)
-        result(nil)
-      } catch {
-        result(FlutterError(code: "record", message: error.localizedDescription, details: nil))
+
+      m_workQueue.async {
+        do {
+          try recorder.setAudioSessionActive(active)
+          DispatchQueue.main.async { result(nil) }
+        } catch {
+          DispatchQueue.main.async {
+            result(FlutterError(code: "record", message: error.localizedDescription, details: nil))
+          }
+        }
       }
-      
+
     case "ios.setAudioSessionCategory":
       guard let category = args["category"] as? String else {
         result(FlutterError(code: "stt", message: "Call missing mandatory parameter category.", details: nil))
@@ -197,12 +234,18 @@ public class RecordIosPlugin: NSObject, FlutterPlugin {
         result(FlutterError(code: "stt", message: "Call missing mandatory parameter options.", details: nil))
         return
       }
-      
-      do {
-        try recorder.setAudioSessionCategory(toAVCategory(category), options: toAVCategoryOptions(options))
-        result(nil)
-      } catch {
-        result(FlutterError(code: "stt", message: error.localizedDescription, details: nil))
+
+      let avCategory = toAVCategory(category)
+      let avOptions = toAVCategoryOptions(options)
+      m_workQueue.async {
+        do {
+          try recorder.setAudioSessionCategory(avCategory, options: avOptions)
+          DispatchQueue.main.async { result(nil) }
+        } catch {
+          DispatchQueue.main.async {
+            result(FlutterError(code: "stt", message: error.localizedDescription, details: nil))
+          }
+        }
       }
     default:
       result(FlutterMethodNotImplemented)
