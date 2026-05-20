@@ -5,17 +5,19 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:record_platform_interface/record_platform_interface.dart';
-import 'package:record_web/encoder/encoder.dart';
 import 'package:record_web/encoder/wav_encoder.dart';
 import 'package:record_web/mime_types.dart';
 import 'package:record_web/recorder/delegate/recorder_delegate.dart';
 import 'package:record_web/recorder/recorder.dart';
+import 'package:record_web/services/audio_chunks_storage_service.dart';
+import 'package:record_web/services/metadata_storage_service.dart';
 import 'package:universal_html/html.dart' as html;
 import 'package:web/web.dart' as web;
 
 /// Web delegate that supports dual-output recording:
 /// - Streams PCM S16LE frames to Dart
-/// - Writes WAV using custom encoder and AAC/Opus using MediaRecorder
+/// - Persists PCM chunks to IndexedDB (used as the WAV source on stop and for crash recovery)
+/// - Writes AAC/Opus using MediaRecorder
 class MultiOutputRecorderDelegate extends RecorderDelegate {
   final OnStateChanged onStateChanged;
 
@@ -27,9 +29,6 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
 
   StreamController<Uint8List>? _recordStreamCtrl;
 
-  // WAV encoder (manual)
-  Encoder? _wavEncoder;
-
   // MediaRecorder for compressed branch (AAC/Opus depending on browser)
   web.MediaRecorder? _mediaRecorder;
   List<web.Blob> _compressedChunks = [];
@@ -37,6 +36,17 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
   // Amplitude (computed from PCM frames)
   double _maxAmplitude = kMinAmplitude;
   double _amplitude = kMinAmplitude;
+
+  // Chunk counter for storage
+  int _pcmChunkCount = 0;
+
+  // Persistent storage for crash recovery — also the source of truth for the WAV blob on stop
+  final _chunksService = AudioChunksStorageService();
+  final _metadataService = MetadataStorageService();
+  String? _currentRecordingId;
+
+  // In-flight IndexedDB writes; awaited on stop so the WAV reflects every captured chunk
+  final List<Future<void>> _pendingWrites = [];
 
   MultiOutputRecorderDelegate({required this.onStateChanged});
 
@@ -118,17 +128,21 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
       );
     }
 
+    _currentRecordingId = basePath;
+
+    // Reset counter
+    _pcmChunkCount = 0;
+
+    _saveMetadataForRecovery(
+      recordingId: basePath,
+      sampleRate: config.sampleRate.toInt(),
+      numChannels: config.numChannels,
+    );
+
     await _recordStreamCtrl?.close();
     _recordStreamCtrl = StreamController<Uint8List>();
 
     await _setupMicrophoneCapture(config);
-
-    // WAV branch: always available since we have PCM frames
-    _wavEncoder?.cleanup();
-    _wavEncoder = WavEncoder(
-      sampleRate: config.sampleRate.toInt(),
-      numChannels: config.numChannels,
-    );
 
     await _setupMediaRecorder();
 
@@ -142,6 +156,24 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     return _recordStreamCtrl!.stream;
   }
 
+  void _saveMetadataForRecovery({
+    required String recordingId,
+    required int sampleRate,
+    required int numChannels,
+  }) {
+    _metadataService
+        .saveMetadata(
+      recordingId: recordingId,
+      sampleRate: sampleRate,
+      numChannels: numChannels,
+    )
+        .catchError((e) {
+      if (kDebugMode) {
+        print('[record_web] Error saving metadata: $e');
+      }
+    });
+  }
+
   @override
   Future<MultiOutputResult> stopDual() async {
     await resetContext(_context, _mediaStream);
@@ -149,11 +181,17 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     _context = null;
 
     final compressedBlob = await _stopMediaRecorder();
-    final wavBlob = await _finalizeWavEncoder();
+    final wavBlob = await _buildWavFromStoredChunks();
 
     onStateChanged(RecordState.stop);
 
     _compressedChunks = [];
+
+    final currentRecordingId = _currentRecordingId;
+    if (currentRecordingId != null) {
+      await _deleteStoredRecording(currentRecordingId);
+      _currentRecordingId = null;
+    }
 
     final result = MultiOutputResult(
       m4aPath: null, // Don't return paths on web
@@ -165,6 +203,19 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     );
 
     return result;
+  }
+
+  Future<void> _deleteStoredRecording(String recordingId) async {
+    try {
+      await _chunksService.deleteChunks(recordingId);
+    } catch (e) {
+      if (kDebugMode) print('[record_web] Error deleting stored chunks: $e');
+    }
+    try {
+      await _metadataService.deleteMetadata(recordingId);
+    } catch (e) {
+      if (kDebugMode) print('[record_web] Error deleting stored metadata: $e');
+    }
   }
 
   @override
@@ -183,9 +234,9 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     // Stop media recorder without waiting for data
     _cancelMediaRecorder();
 
-    // Cleanup WAV encoder without finalizing
-    _wavEncoder?.cleanup();
-    _wavEncoder = null;
+    // Drop any pending writes — a cancelled recording shouldn't survive in IndexedDB,
+    // and we explicitly purge the stored chunks/metadata below.
+    _pendingWrites.clear();
 
     // Clear compressed chunks
     _compressedChunks = [];
@@ -193,6 +244,12 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     // Reset amplitude
     _maxAmplitude = kMinAmplitude;
     _amplitude = kMinAmplitude;
+
+    final cancelledRecordingId = _currentRecordingId;
+    if (cancelledRecordingId != null) {
+      await _deleteStoredRecording(cancelledRecordingId);
+      _currentRecordingId = null;
+    }
 
     onStateChanged(RecordState.stop);
   }
@@ -210,9 +267,70 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     if (pcmData case final audioSamples?) {
       final audioBytes = audioSamples.buffer.asUint8List();
       _recordStreamCtrl?.add(audioBytes);
-      // Feed WAV encoder with PCM samples
-      _wavEncoder?.encode(audioSamples);
       _updateAmplitude(audioSamples);
+
+      _pcmChunkCount++;
+      _saveChunkToStorage(
+        chunkIndex: _pcmChunkCount,
+        chunkData: audioBytes,
+      );
+    }
+  }
+
+  void _saveChunkToStorage({
+    required int chunkIndex,
+    required Uint8List chunkData,
+  }) {
+    final recordingId = _currentRecordingId;
+    if (recordingId == null) {
+      throw StateError('Recording ID is null during PCM recording');
+    }
+
+    final write = _chunksService
+        .saveChunk(
+      recordingId: recordingId,
+      chunkIndex: chunkIndex,
+      chunkData: chunkData,
+    )
+        .catchError((e) {
+      if (kDebugMode) {
+        print('[record_web] Error saving PCM chunk: $e');
+      }
+    });
+    _pendingWrites.add(write);
+  }
+
+  Future<web.Blob?> _buildWavFromStoredChunks() async {
+    final recordingId = _currentRecordingId;
+    if (recordingId == null) return null;
+
+    // Make sure every in-flight write has landed before we read back.
+    if (_pendingWrites.isNotEmpty) {
+      final inFlight = List<Future<void>>.from(_pendingWrites);
+      _pendingWrites.clear();
+      await Future.wait(inFlight);
+    }
+
+    try {
+      final chunks = await _chunksService.getChunks(recordingId);
+      if (chunks.isEmpty) return null;
+
+      final metadata = await _metadataService.getMetadata(recordingId);
+      if (metadata == null) return null;
+
+      final encoder = WavEncoder(
+        sampleRate: metadata['sampleRate'] as int? ?? 44100,
+        numChannels: metadata['numChannels'] as int? ?? 1,
+      );
+      for (final chunk in chunks) {
+        encoder.encode(Int16List.view(chunk.buffer));
+      }
+      final blob = encoder.finish();
+      encoder.cleanup();
+      return blob;
+    } catch (error) {
+      debugPrint(error.toString());
+      return null;
     }
   }
 
@@ -296,18 +414,6 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
       return web.Blob(_compressedChunks.toJS);
     }
     return null;
-  }
-
-  Future<web.Blob?> _finalizeWavEncoder() async {
-    try {
-      final wavBlob = _wavEncoder?.finish();
-      _wavEncoder?.cleanup();
-      _wavEncoder = null;
-      return wavBlob;
-    } catch (error) {
-      debugPrint(error.toString());
-      return null;
-    }
   }
 
   void _updateAmplitude(Int16List audioData) {
