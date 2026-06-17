@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
@@ -52,7 +53,23 @@ class AudioRecordingService : Service() {
         intent?.getStringExtra("title"),
         intent?.getStringExtra("content")
       )
-      startForeground(NOTIFICATION_ID, notification)
+
+      // From Android 11 (API 30) on, a foreground service is denied microphone
+      // I/O while the app is backgrounded unless it is started with the
+      // microphone foreground service type. Without it, OEM-skinned devices
+      // (vivo, Xiaomi, OnePlus, Samsung, ...) silently stop writing audio
+      // frames to disk, truncating the recording. On Android 14 (API 34+) this
+      // type is mandatory and additionally requires the
+      // FOREGROUND_SERVICE_MICROPHONE permission. See bug #1674.
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        startForeground(
+          NOTIFICATION_ID,
+          notification,
+          ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        )
+      } else {
+        startForeground(NOTIFICATION_ID, notification)
+      }
 
       notificationManager.notify(NOTIFICATION_ID, notification)
     }
