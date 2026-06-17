@@ -1,3 +1,6 @@
+## 1.4.4
+* fix: Start the recording foreground service with the `microphone` service type (Android 11+) so the OS keeps writing audio frames while the app is backgrounded, preventing silent recording truncation on OEM-skinned devices.
+
 ## 1.4.3
 * fix: Missing notification channel when using AndroidService.
 
