@@ -181,7 +181,10 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     _context = null;
 
     final compressedBlob = await _stopMediaRecorder();
-    final wavBlob = await _buildWavFromStoredChunks();
+    await _drainPendingWrites();
+    // Rebuilding the WAV reads every stored chunk back, so its cost grows with the
+    // recording length: only pay it when there is no compressed file to return.
+    final wavBlob = compressedBlob == null ? await _buildWavFromStoredChunks() : null;
 
     onStateChanged(RecordState.stop);
 
@@ -199,7 +202,11 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
       m4aBlob: compressedBlob as html.Blob?,
       wavBlob: wavBlob as html.Blob?,
       m4aError: compressedBlob == null ? 'Compressed branch not available' : null,
-      wavError: wavBlob == null ? 'WAV encoding failed or no data' : null,
+      wavError: switch ((wavBlob, compressedBlob)) {
+        (null, null) => 'WAV encoding failed or no data',
+        (null, _) => 'WAV not built: compressed branch available',
+        _ => null,
+      },
     );
 
     return result;
@@ -300,16 +307,17 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     _pendingWrites.add(write);
   }
 
+  /// Waits for every in-flight chunk write, so a read-back or a delete sees all of them.
+  Future<void> _drainPendingWrites() async {
+    if (_pendingWrites.isEmpty) return;
+    final inFlight = List<Future<void>>.from(_pendingWrites);
+    _pendingWrites.clear();
+    await Future.wait(inFlight);
+  }
+
   Future<web.Blob?> _buildWavFromStoredChunks() async {
     final recordingId = _currentRecordingId;
     if (recordingId == null) return null;
-
-    // Make sure every in-flight write has landed before we read back.
-    if (_pendingWrites.isNotEmpty) {
-      final inFlight = List<Future<void>>.from(_pendingWrites);
-      _pendingWrites.clear();
-      await Future.wait(inFlight);
-    }
 
     try {
       final chunks = await _chunksService.getChunks(recordingId);
