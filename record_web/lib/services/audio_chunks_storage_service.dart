@@ -40,18 +40,18 @@ class AudioChunksStorageService {
   }
 
   Future<Map<int, Uint8List>> _getChunksFrom(ObjectStore store, String recordingId) async {
-    final keys = await store.getAllKeys();
+    final range = _keyRangeOf(recordingId);
+    // Both lists come back in key order, so they line up index by index.
+    final keys = await store.getAllKeys(range);
+    final values = await store.getAll(range);
     final chunks = <int, Uint8List>{};
 
-    for (final key in keys) {
-      final keyStr = key.toString();
-      if (keyStr.startsWith('${recordingId}_')) {
-        final chunkIndex = int.parse(keyStr.split('_').last);
-        final data = await store.getObject(key);
+    for (var i = 0; i < keys.length; i++) {
+      final chunkIndex = int.parse(keys[i].toString().split('_').last);
+      final data = values[i];
 
-        if (data is Uint8List && data.isNotEmpty) {
-          chunks[chunkIndex] = data;
-        }
+      if (data is Uint8List && data.isNotEmpty) {
+        chunks[chunkIndex] = data;
       }
     }
 
@@ -62,28 +62,12 @@ class AudioChunksStorageService {
     final transaction = await _getTransaction(idbModeReadWrite);
     final store = transaction.objectStore(kChunksStoreName);
 
-    final keysToDelete = await _getKeysToDelete(
-      store: store,
-      recordingId: recordingId,
-    );
-
-    await _deleteEachKey(keysToDelete, store);
+    await store.delete(_keyRangeOf(recordingId));
     await transaction.completed;
   }
 
-  Future<List<String>> _getKeysToDelete({
-    required ObjectStore store,
-    required String recordingId,
-  }) async {
-    final keys = await store.getAllKeys();
-    return keys.where((key) => key.toString().startsWith('${recordingId}_')).map((key) => key.toString()).toList();
-  }
-
-  Future<void> _deleteEachKey(List<String> keysToDelete, ObjectStore store) async {
-    for (final key in keysToDelete) {
-      await store.delete(key);
-    }
-  }
+  /// Every key that starts with `${recordingId}_`: chunk keys are `${recordingId}_<index>`.
+  KeyRange _keyRangeOf(String recordingId) => KeyRange.bound('${recordingId}_', '${recordingId}_\uffff');
 
   Future<Transaction> _getTransaction(String mode) {
     return DatabaseManager.instance.getTransaction(kChunksStoreName, mode);

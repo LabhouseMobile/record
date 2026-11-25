@@ -131,6 +131,25 @@ void main() {
           expect(result[2], equals(chunk2));
         });
 
+        test(
+          'chunks in numeric order when keys sort differently as text',
+          () async {
+            const recordingId = 'test-recording-id';
+
+            for (final index in [10, 2, 1]) {
+              await service.saveChunk(
+                recordingId: recordingId,
+                chunkIndex: index,
+                chunkData: Uint8List.fromList([index]),
+              );
+            }
+
+            final result = await service.getChunks(recordingId);
+
+            expect(result.map((chunk) => chunk.single), [1, 2, 10]);
+          },
+        );
+
         test('only chunks for specified recordingId', () async {
           const recordingId = 'test-recording-id';
           const otherRecordingId = 'other-recording-id';
