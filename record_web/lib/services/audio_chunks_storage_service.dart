@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:idb_shim/idb.dart';
 
 import 'database_manager.dart';
+import 'metadata_storage_service.dart';
 
 /// Service to store audio chunks progressively using IndexedDB
 /// This allows recovery of recordings if the page is closed during recording
@@ -63,6 +64,43 @@ class AudioChunksStorageService {
     final store = transaction.objectStore(kChunksStoreName);
 
     await store.delete(_keyRangeOf(recordingId));
+    await transaction.completed;
+  }
+
+  /// Deletes the chunks of every recording that has no metadata left.
+  ///
+  /// Recovery needs the metadata, so a recording without it can never be recovered: its chunks are what a tab
+  /// closed mid-deletion leaves behind. Metadata is written before a recording's first chunk, so a live recording
+  /// is never swept. Visits one key per stored recording, not one per chunk.
+  Future<void> deleteOrphanChunks() async {
+    String? after;
+    while (true) {
+      final key = await _firstKeyAfter(after);
+      if (key == null) return;
+
+      final recordingId = key.substring(0, key.lastIndexOf('_'));
+      await _deleteChunksIfNoMetadata(recordingId);
+      after = '${recordingId}_\uffff';
+    }
+  }
+
+  Future<String?> _firstKeyAfter(String? after) async {
+    final transaction = await _getTransaction(idbModeReadOnly);
+    final store = transaction.objectStore(kChunksStoreName);
+    final keys = await store.getAllKeys(after == null ? null : KeyRange.lowerBound(after, true), 1);
+    await transaction.completed;
+    return keys.isEmpty ? null : keys.single.toString();
+  }
+
+  Future<void> _deleteChunksIfNoMetadata(String recordingId) async {
+    final transaction = await DatabaseManager.instance.getTransactionList(
+      [kChunksStoreName, MetadataStorageService.kMetadataStoreName],
+      idbModeReadWrite,
+    );
+    final metadata = await transaction.objectStore(MetadataStorageService.kMetadataStoreName).getObject(recordingId);
+    if (metadata == null) {
+      await transaction.objectStore(kChunksStoreName).delete(_keyRangeOf(recordingId));
+    }
     await transaction.completed;
   }
 

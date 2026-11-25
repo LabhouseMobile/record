@@ -205,7 +205,8 @@ class RecordPluginWebWrapper extends RecordPlatform {
   /// or if the user chooses to discard the pending recording.
   @override
   Future<void> deleteRecording(String path) async {
-    await _chunksService.deleteChunks(path);
+    // Metadata first: chunks left without it if this is interrupted are deleted by the orphan sweep.
     await _metadataService.deleteMetadata(path);
+    await _chunksService.deleteChunks(path);
   }
 }

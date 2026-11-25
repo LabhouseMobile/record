@@ -68,6 +68,12 @@ class DatabaseManager {
     return db.transaction(storeName, mode);
   }
 
+  /// Get one transaction spanning several stores, so reads and writes across them are atomic
+  Future<Transaction> getTransactionList(List<String> storeNames, String mode) async {
+    final db = await getDatabase();
+    return db.transactionList(storeNames, mode);
+  }
+
   Future<void> close() async {
     _db?.close();
     _db = null;

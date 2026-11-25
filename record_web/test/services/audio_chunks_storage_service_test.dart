@@ -4,10 +4,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:idb_shim/idb_io.dart';
 import 'package:record_web/services/audio_chunks_storage_service.dart';
 import 'package:record_web/services/database_manager.dart';
+import 'package:record_web/services/metadata_storage_service.dart';
 
 void main() {
   group('AudioChunksStorageService', () {
     late AudioChunksStorageService service;
+    late MetadataStorageService metadataService;
     late IdbFactory factory;
 
     setUp(() {
@@ -15,7 +17,14 @@ void main() {
       factory = idbFactoryMemoryFs;
       DatabaseManager.instance.setFactory(factory);
       service = AudioChunksStorageService();
+      metadataService = MetadataStorageService();
     });
+
+    Future<void> saveChunks(String recordingId, int count) async {
+      for (var i = 0; i < count; i++) {
+        await service.saveChunk(recordingId: recordingId, chunkIndex: i, chunkData: Uint8List.fromList([i]));
+      }
+    }
 
     tearDown(() async {
       await DatabaseManager.instance.close();
@@ -233,6 +242,49 @@ void main() {
           expect(otherResult, hasLength(1));
           expect(otherResult[0], equals(otherChunk));
         });
+      });
+    });
+
+    group('deleteOrphanChunks', () {
+      test('deletes the chunks of recordings without metadata', () async {
+        await saveChunks('orphan-a', 3);
+        await saveChunks('orphan-b', 2);
+
+        await service.deleteOrphanChunks();
+
+        expect(await service.getChunks('orphan-a'), isEmpty);
+        expect(await service.getChunks('orphan-b'), isEmpty);
+      });
+
+      test('keeps the chunks of recordings that still have metadata', () async {
+        await metadataService.saveMetadata(recordingId: 'recoverable', sampleRate: 16000, numChannels: 1);
+        await saveChunks('recoverable', 3);
+        await saveChunks('orphan', 2);
+
+        await service.deleteOrphanChunks();
+
+        expect(await service.getChunks('recoverable'), hasLength(3));
+        expect(await service.getChunks('orphan'), isEmpty);
+      });
+
+      test('checks every recording, whichever order their keys sort in', () async {
+        for (final id in ['a-orphan', 'b-kept', 'c-orphan', 'd-kept']) {
+          if (id.endsWith('kept')) {
+            await metadataService.saveMetadata(recordingId: id, sampleRate: 16000, numChannels: 1);
+          }
+          await saveChunks(id, 12);
+        }
+
+        await service.deleteOrphanChunks();
+
+        expect(await service.getChunks('a-orphan'), isEmpty);
+        expect(await service.getChunks('b-kept'), hasLength(12));
+        expect(await service.getChunks('c-orphan'), isEmpty);
+        expect(await service.getChunks('d-kept'), hasLength(12));
+      });
+
+      test('completes when there are no chunks', () async {
+        await expectLater(service.deleteOrphanChunks(), completes);
       });
     });
 

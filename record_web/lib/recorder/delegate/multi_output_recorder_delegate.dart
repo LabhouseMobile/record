@@ -133,7 +133,10 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     // Reset counter
     _pcmChunkCount = 0;
 
-    _saveMetadataForRecovery(
+    unawaited(_deleteOrphanChunks());
+
+    // Awaited so the metadata exists before the first chunk: the orphan sweep deletes chunks without metadata.
+    await _saveMetadataForRecovery(
       recordingId: basePath,
       sampleRate: config.sampleRate.toInt(),
       numChannels: config.numChannels,
@@ -156,12 +159,12 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     return _recordStreamCtrl!.stream;
   }
 
-  void _saveMetadataForRecovery({
+  Future<void> _saveMetadataForRecovery({
     required String recordingId,
     required int sampleRate,
     required int numChannels,
   }) {
-    _metadataService
+    return _metadataService
         .saveMetadata(
       recordingId: recordingId,
       sampleRate: sampleRate,
@@ -192,7 +195,7 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
 
     final currentRecordingId = _currentRecordingId;
     if (currentRecordingId != null) {
-      await _deleteStoredRecording(currentRecordingId);
+      await _forgetStoredRecording(currentRecordingId);
       _currentRecordingId = null;
     }
 
@@ -212,16 +215,32 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     return result;
   }
 
-  Future<void> _deleteStoredRecording(String recordingId) async {
-    try {
-      await _chunksService.deleteChunks(recordingId);
-    } catch (e) {
-      if (kDebugMode) print('[record_web] Error deleting stored chunks: $e');
-    }
+  /// Makes [recordingId] unrecoverable right away by deleting its metadata, then deletes its chunks in the
+  /// background once [inFlightWrites] land: that delete grows with the recording length (~2.5 s per hour).
+  /// Chunks left behind by a tab closed meanwhile are deleted by the orphan sweep on the next start.
+  Future<void> _forgetStoredRecording(String recordingId, {List<Future<void>> inFlightWrites = const []}) async {
     try {
       await _metadataService.deleteMetadata(recordingId);
     } catch (e) {
       if (kDebugMode) print('[record_web] Error deleting stored metadata: $e');
+    }
+    unawaited(_deleteChunksAfter(recordingId, inFlightWrites));
+  }
+
+  Future<void> _deleteChunksAfter(String recordingId, List<Future<void>> inFlightWrites) async {
+    try {
+      await Future.wait(inFlightWrites);
+      await _chunksService.deleteChunks(recordingId);
+    } catch (e) {
+      if (kDebugMode) print('[record_web] Error deleting stored chunks: $e');
+    }
+  }
+
+  Future<void> _deleteOrphanChunks() async {
+    try {
+      await _chunksService.deleteOrphanChunks();
+    } catch (e) {
+      if (kDebugMode) print('[record_web] Error deleting orphan chunks: $e');
     }
   }
 
@@ -241,8 +260,8 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     // Stop media recorder without waiting for data
     _cancelMediaRecorder();
 
-    // Drop any pending writes — a cancelled recording shouldn't survive in IndexedDB,
-    // and we explicitly purge the stored chunks/metadata below.
+    // A cancelled recording shouldn't survive in IndexedDB: its chunks are deleted once these writes land.
+    final inFlightWrites = List<Future<void>>.from(_pendingWrites);
     _pendingWrites.clear();
 
     // Clear compressed chunks
@@ -254,7 +273,7 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
 
     final cancelledRecordingId = _currentRecordingId;
     if (cancelledRecordingId != null) {
-      await _deleteStoredRecording(cancelledRecordingId);
+      await _forgetStoredRecording(cancelledRecordingId, inFlightWrites: inFlightWrites);
       _currentRecordingId = null;
     }
 
