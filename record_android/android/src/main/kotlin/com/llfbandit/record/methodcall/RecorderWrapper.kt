@@ -194,15 +194,17 @@ class RecorderWrapper(
           emptyMap()
         }
         
-        // Build response map with separate paths and errors
-        val m4aPath = outputResults.keys.firstOrNull { it.endsWith(".m4a") }
-        val wavPath = outputResults.keys.firstOrNull { it.endsWith(".wav") }
+        // Results are keyed by output path; a path is only returned when its writer succeeded
+        val m4aKey = outputResults.keys.firstOrNull { it.endsWith(".m4a") }
+        val wavKey = outputResults.keys.firstOrNull { it.endsWith(".wav") }
+        val m4aError = m4aKey?.let { outputResults[it] }
+        val wavError = wavKey?.let { outputResults[it] }
         
         val response = mapOf(
-          "m4aPath" to m4aPath,
-          "wavPath" to wavPath,
-          "m4aError" to outputResults[m4aPath],
-          "wavError" to outputResults[wavPath]
+          "m4aPath" to if (m4aError == null) m4aKey else null,
+          "wavPath" to if (wavError == null) wavKey else null,
+          "m4aError" to m4aError,
+          "wavError" to wavError
         )
         
         result.success(response)

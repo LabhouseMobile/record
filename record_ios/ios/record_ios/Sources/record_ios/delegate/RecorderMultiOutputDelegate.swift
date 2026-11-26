@@ -184,9 +184,7 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
   func getOutputResults() -> [String: String?] {
     var results: [String: String?] = [:]
     for writer in outputWriters {
-      if let path = writer.getOutputPath() ?? writer.getError() {
-        results[path] = writer.getError()
-      }
+      results[writer.configuredPath] = writer.getError()
     }
     return results
   }

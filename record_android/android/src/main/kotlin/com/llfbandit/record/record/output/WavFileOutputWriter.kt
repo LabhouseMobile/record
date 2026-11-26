@@ -71,6 +71,9 @@ class WavFileOutputWriter(
     return if (errorMessage == null) outputPath else null
   }
 
+  override val configuredPath: String
+    get() = outputPath
+
   override fun getError(): String? {
     return errorMessage
   }

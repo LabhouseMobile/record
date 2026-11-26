@@ -104,15 +104,17 @@ class Recorder {
       stop { _ in
         let outputResults = d.getOutputResults()
         
-        // Extract M4A and WAV paths/errors from results
-        let m4aPath = outputResults.keys.first { $0.hasSuffix(".m4a") }
-        let wavPath = outputResults.keys.first { $0.hasSuffix(".wav") }
+        // Results are keyed by output path; a path is only returned when its writer succeeded
+        let m4aKey = outputResults.keys.first { $0.hasSuffix(".m4a") }
+        let wavKey = outputResults.keys.first { $0.hasSuffix(".wav") }
+        let m4aError = m4aKey.flatMap { outputResults[$0] ?? nil }
+        let wavError = wavKey.flatMap { outputResults[$0] ?? nil }
         
         completionHandler([
-          "m4aPath": m4aPath,
-          "wavPath": wavPath,
-          "m4aError": m4aPath.map { outputResults[$0] } ?? nil,
-          "wavError": wavPath.map { outputResults[$0] } ?? nil
+          "m4aPath": m4aError == nil ? m4aKey : nil,
+          "wavPath": wavError == nil ? wavKey : nil,
+          "m4aError": m4aError,
+          "wavError": wavError
         ])
       }
     } else {

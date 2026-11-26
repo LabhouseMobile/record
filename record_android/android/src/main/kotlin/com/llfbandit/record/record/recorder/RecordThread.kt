@@ -209,9 +209,8 @@ class RecordThread(
    * Returns a map of output path to error message (null if successful).
    */
   fun getOutputResults(): Map<String, String?> {
-    return outputWriters.associate { writer ->
-      val path = writer.getOutputPath() ?: "unknown"
-      path to writer.getError()
-    }
+    return outputWriters.mapNotNull { writer ->
+      writer.configuredPath?.let { path -> path to writer.getError() }
+    }.toMap()
   }
 }

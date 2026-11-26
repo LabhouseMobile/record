@@ -17,6 +17,9 @@ class EncoderOutputWriter(
   private var encoder: IEncoder? = null
   private var errorMessage: String? = null
 
+  override val configuredPath: String?
+    get() = config.path
+
   override fun start() {
     val (newEncoder, _) = format.getEncoder(config, listener)
     encoder = newEncoder

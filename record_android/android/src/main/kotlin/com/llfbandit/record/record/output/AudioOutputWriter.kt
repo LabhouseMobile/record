@@ -47,5 +47,10 @@ interface AudioOutputWriter {
    * @return Error message or null if no error
    */
   fun getError(): String?
+
+  /**
+   * The path this writer writes to, whether or not writing succeeded.
+   */
+  val configuredPath: String?
 }
 

@@ -17,6 +17,15 @@ class M4aFileOutputWriter: AudioOutputWriter {
   }
   
   func start(pcmFormat: AVAudioFormat) throws {
+    do {
+      try startWriter(pcmFormat: pcmFormat)
+    } catch {
+      errorMessage = error.localizedDescription
+      throw error
+    }
+  }
+
+  private func startWriter(pcmFormat: AVAudioFormat) throws {
     self.pcmFormat = pcmFormat
     
     // Delete existing file if it exists
@@ -132,6 +141,10 @@ class M4aFileOutputWriter: AudioOutputWriter {
   
   func getOutputPath() -> String? {
     return errorMessage == nil ? outputPath : nil
+  }
+  
+  var configuredPath: String {
+    return outputPath
   }
   
   func getError() -> String? {
