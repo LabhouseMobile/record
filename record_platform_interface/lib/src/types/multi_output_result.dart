@@ -15,6 +15,9 @@ class MultiOutputResult {
   /// Error message from WAV writing, or null if successful
   final String? wavError;
 
+  /// Audio the M4A writer dropped (iOS only), or null if not measured
+  final int? m4aDroppedMs;
+
   /// Blob for the M4A output file, or null if writing failed
   final html.Blob? m4aBlob;
 
@@ -28,6 +31,7 @@ class MultiOutputResult {
     this.wavBlob,
     this.m4aError,
     this.wavError,
+    this.m4aDroppedMs,
   });
 
   /// Check if all outputs completed successfully
@@ -63,6 +67,7 @@ class MultiOutputResult {
       wavPath: map['wavPath'] as String?,
       m4aError: map['m4aError'] as String?,
       wavError: map['wavError'] as String?,
+      m4aDroppedMs: map['m4aDroppedMs'] as int?,
       m4aBlob: map['m4aBlob'] as html.Blob?,
       wavBlob: map['wavBlob'] as html.Blob?,
     );
@@ -75,6 +80,7 @@ class MultiOutputResult {
       'wavPath': wavPath,
       'm4aError': m4aError,
       'wavError': wavError,
+      'm4aDroppedMs': m4aDroppedMs,
       'm4aBlob': m4aBlob,
       'wavBlob': wavBlob,
     };
@@ -88,6 +94,7 @@ MultiOutputResult(
   wavPath: $wavPath,
   m4aError: $m4aError,
   wavError: $wavError,
+  m4aDroppedMs: $m4aDroppedMs,
   m4aBlob: $m4aBlob,
   wavBlob: $wavBlob,
 )

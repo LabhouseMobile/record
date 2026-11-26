@@ -10,6 +10,11 @@ class M4aFileOutputWriter: AudioOutputWriter {
   private var input: AVAssetWriterInput?
   private var errorMessage: String?
   private var pcmFormat: AVAudioFormat?
+  private var receivedFrames: Int64 = 0
+  private var droppedFrames: Int64 = 0
+  /// Audio dropped because the input was not ready for more data, set at stop.
+  private(set) var droppedMs = 0
+  private let maxDroppedMs = 5000
   
   init(outputPath: String, bitRate: Int) {
     self.outputPath = outputPath
@@ -91,7 +96,11 @@ class M4aFileOutputWriter: AudioOutputWriter {
           let writer = writer,
           let pcmFormat = pcmFormat else { return }
     
-    guard input.isReadyForMoreMediaData else { return }
+    receivedFrames += Int64(buffer.frameLength)
+    guard input.isReadyForMoreMediaData else {
+      droppedFrames += Int64(buffer.frameLength)
+      return
+    }
     
     let pts = CMTimeMake(value: framePosition, timescale: Int32(pcmFormat.sampleRate))
     
@@ -129,8 +138,19 @@ class M4aFileOutputWriter: AudioOutputWriter {
         self.errorMessage = writer.error?.localizedDescription ?? "Unknown error"
       }
       
+      self.droppedMs = self.milliseconds(self.droppedFrames)
+      // More than 5 s dropped leaves holes in the M4A: fail it so the WAV is used
+      if self.errorMessage == nil, self.droppedMs > self.maxDroppedMs {
+        self.errorMessage = "M4A writer dropped \(self.droppedMs) ms of \(self.milliseconds(self.receivedFrames)) ms"
+      }
+      
       completion()
     }
+  }
+  
+  private func milliseconds(_ frames: Int64) -> Int {
+    guard let sampleRate = pcmFormat?.sampleRate, sampleRate > 0 else { return 0 }
+    return Int(Double(frames) * 1000 / sampleRate)
   }
   
   func release() {

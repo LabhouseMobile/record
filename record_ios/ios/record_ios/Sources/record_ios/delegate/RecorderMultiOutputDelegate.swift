@@ -189,6 +189,11 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
     return results
   }
   
+  /// Audio the M4A writer dropped, or nil without an M4A writer
+  func getM4aDroppedMs() -> Int? {
+    return outputWriters.compactMap { $0 as? M4aFileOutputWriter }.first?.droppedMs
+  }
+  
   func pause() {
     isInterrupted = true
     audioEngine?.pause()

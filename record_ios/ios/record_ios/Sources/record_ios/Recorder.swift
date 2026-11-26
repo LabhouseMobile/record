@@ -114,7 +114,8 @@ class Recorder {
           "m4aPath": m4aError == nil ? m4aKey : nil,
           "wavPath": wavError == nil ? wavKey : nil,
           "m4aError": m4aError,
-          "wavError": wavError
+          "wavError": wavError,
+          "m4aDroppedMs": d.getM4aDroppedMs()
         ])
       }
     } else {
