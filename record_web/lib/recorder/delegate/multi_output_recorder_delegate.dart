@@ -46,7 +46,7 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
   final _metadataService = MetadataStorageService();
   String? _currentRecordingId;
 
-  // In-flight IndexedDB writes; awaited on stop so the WAV reflects every captured chunk
+  // In-flight IndexedDB writes; the WAV read-back waits for them so it covers every captured chunk
   final List<Future<void>> _pendingWrites = [];
 
   MultiOutputRecorderDelegate({required this.onStateChanged});
@@ -185,7 +185,6 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     _context = null;
 
     final compressedBlob = await _stopMediaRecorder();
-    await _drainPendingWrites();
     // Rebuilding the WAV reads every stored chunk back, so its cost grows with the
     // recording length: only pay it when there is no compressed file to return.
     final wavBlob = compressedBlob == null ? await _buildWavFromStoredChunks() : null;
@@ -213,20 +212,21 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
   }
 
   /// Makes [recordingId] unrecoverable right away by deleting its metadata, then deletes its chunks in the
-  /// background once [inFlightWrites] land: that delete grows with the recording length (~2.5 s per hour).
-  /// Chunks left behind by a tab closed meanwhile are deleted by the orphan sweep on the next start.
-  Future<void> _forgetStoredRecording(String recordingId, {List<Future<void>> inFlightWrites = const []}) async {
+  /// background: that delete grows with the recording length (~2.5 s per hour). It needn't wait for in-flight
+  /// chunk writes: they created their transactions first, and IndexedDB runs overlapping transactions in creation
+  /// order. Chunks left behind by a tab closed meanwhile are deleted by the orphan sweep.
+  Future<void> _forgetStoredRecording(String recordingId) async {
+    _pendingWrites.clear();
     try {
       await _metadataService.deleteMetadata(recordingId);
     } catch (e) {
       if (kDebugMode) print('[record_web] Error deleting stored metadata: $e');
     }
-    unawaited(_deleteChunksAfter(recordingId, inFlightWrites));
+    unawaited(_deleteChunks(recordingId));
   }
 
-  Future<void> _deleteChunksAfter(String recordingId, List<Future<void>> inFlightWrites) async {
+  Future<void> _deleteChunks(String recordingId) async {
     try {
-      await Future.wait(inFlightWrites);
       await _chunksService.deleteChunks(recordingId);
     } catch (e) {
       if (kDebugMode) print('[record_web] Error deleting stored chunks: $e');
@@ -257,10 +257,6 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     // Stop media recorder without waiting for data
     _cancelMediaRecorder();
 
-    // A cancelled recording shouldn't survive in IndexedDB: its chunks are deleted once these writes land.
-    final inFlightWrites = List<Future<void>>.from(_pendingWrites);
-    _pendingWrites.clear();
-
     // Clear compressed chunks
     _compressedChunks = [];
 
@@ -270,7 +266,7 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
 
     final cancelledRecordingId = _currentRecordingId;
     if (cancelledRecordingId != null) {
-      await _forgetStoredRecording(cancelledRecordingId, inFlightWrites: inFlightWrites);
+      await _forgetStoredRecording(cancelledRecordingId);
       _currentRecordingId = null;
     }
 
@@ -323,7 +319,7 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     _pendingWrites.add(write);
   }
 
-  /// Waits for every in-flight chunk write, so a read-back or a delete sees all of them.
+  /// Waits for every in-flight chunk write, so the WAV read-back sees all of them.
   Future<void> _drainPendingWrites() async {
     if (_pendingWrites.isEmpty) return;
     final inFlight = List<Future<void>>.from(_pendingWrites);
@@ -335,6 +331,7 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     final recordingId = _currentRecordingId;
     if (recordingId == null) return null;
 
+    await _drainPendingWrites();
     try {
       final chunks = await _chunksService.getChunks(recordingId);
       if (chunks.isEmpty) return null;
