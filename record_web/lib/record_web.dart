@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:js_interop';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_web_plugins/flutter_web_plugins.dart';
 import 'package:record_platform_interface/record_platform_interface.dart';
@@ -18,16 +19,39 @@ class RecordPluginWeb {
 }
 
 class RecordPluginWebWrapper extends RecordPlatform {
+  RecordPluginWebWrapper({
+    AudioChunksStorageService? chunksService,
+    MetadataStorageService? metadataService,
+  })  : _chunksService = chunksService ?? AudioChunksStorageService(),
+        _metadataService = metadataService ?? MetadataStorageService();
+
   // recorders from recorderId
   final _recorders = <String, Recorder>{};
 
   // Shared storage services for recovery
-  final _chunksService = AudioChunksStorageService();
-  final _metadataService = MetadataStorageService();
+  final AudioChunksStorageService _chunksService;
+  final MetadataStorageService _metadataService;
+
+  Future<void>? _orphanSweep;
+
+  /// The orphan sweep started by the first [create], if any.
+  @visibleForTesting
+  Future<void>? get orphanSweep => _orphanSweep;
 
   @override
   Future<void> create(String recorderId) async {
     _recorders[recorderId] = Recorder();
+    // Once per page load, so a recording discarded just before a tab closed doesn't wait for the next recording to
+    // leave IndexedDB. Safe alongside a live recording in any tab: the sweep only deletes chunks without metadata.
+    _orphanSweep ??= _deleteOrphanChunks();
+  }
+
+  Future<void> _deleteOrphanChunks() async {
+    try {
+      await _chunksService.deleteOrphanChunks();
+    } catch (e) {
+      if (kDebugMode) print('[record_web] Error deleting orphan chunks: $e');
+    }
   }
 
   @override
