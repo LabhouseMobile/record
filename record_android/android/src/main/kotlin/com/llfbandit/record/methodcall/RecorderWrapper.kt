@@ -94,7 +94,7 @@ class RecorderWrapper(
     val format = com.llfbandit.record.record.format.AacFormat()
     val encoderListener = object : EncoderListener {
       override fun onEncoderFailure(ex: Exception) {
-        // Errors are tracked internally by the writer
+        // EncoderOutputWriter records the failure and stopDual reports it
       }
       override fun onEncoderStream(bytes: ByteArray) {
         // Stream is handled separately by RecordThread

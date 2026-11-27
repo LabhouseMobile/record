@@ -34,7 +34,7 @@ class WavFileOutputWriter(
       container!!.addTrack(pcmFormat)
       container!!.start()
     } catch (ex: Exception) {
-      errorMessage = ex.message
+      errorMessage = ex.message ?: ex.toString()
       container = null
     }
   }
@@ -48,7 +48,7 @@ class WavFileOutputWriter(
       bufferInfo.size = buffer.size
       container!!.writeSampleData(0, byteBuffer, bufferInfo)
     } catch (ex: Exception) {
-      errorMessage = ex.message
+      errorMessage = ex.message ?: ex.toString()
     }
   }
 
@@ -57,7 +57,7 @@ class WavFileOutputWriter(
       container?.stop()
     } catch (ex: Exception) {
       if (errorMessage == null) {
-        errorMessage = ex.message
+        errorMessage = ex.message ?: ex.toString()
       }
     }
   }
