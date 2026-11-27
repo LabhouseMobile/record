@@ -18,16 +18,21 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
   private var isResuming = false
   private var isInterrupted = false
   private var isRestartPending = false
+  private let m4aWriter: M4aFileOutputWriter
+  private let wavWriter: WavFileOutputWriter
   private let outputWriters: [AudioOutputWriter]
   private var currentFramePosition: Int64 = 0
   
   init(
-    outputWriters: [AudioOutputWriter],
+    m4aWriter: M4aFileOutputWriter,
+    wavWriter: WavFileOutputWriter,
     manageAudioSession: Bool,
     onPause: @escaping () -> (),
     onStop: @escaping () -> ()
   ) {
-    self.outputWriters = outputWriters
+    self.m4aWriter = m4aWriter
+    self.wavWriter = wavWriter
+    self.outputWriters = [m4aWriter, wavWriter]
     self.manageAudioSession = manageAudioSession
     self.onPause = onPause
     self.onStop = onStop
@@ -180,18 +185,15 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
     recordEventHandler = nil
   }
   
-  /// Get results from all output writers
-  func getOutputResults() -> [String: String?] {
-    var results: [String: String?] = [:]
-    for writer in outputWriters {
-      results[writer.configuredPath] = writer.getError()
-    }
-    return results
-  }
-  
-  /// Audio the M4A writer dropped, or nil without an M4A writer
-  func getM4aDroppedMs() -> Int? {
-    return outputWriters.compactMap { $0 as? M4aFileOutputWriter }.first?.droppedMs
+  /// The stopDual response; a path is only returned when its writer succeeded
+  func getOutputResult() -> [String: Any?] {
+    return [
+      "m4aPath": m4aWriter.getOutputPath(),
+      "wavPath": wavWriter.getOutputPath(),
+      "m4aError": m4aWriter.getError(),
+      "wavError": wavWriter.getError(),
+      "m4aDroppedMs": m4aWriter.droppedMs
+    ]
   }
   
   func pause() {

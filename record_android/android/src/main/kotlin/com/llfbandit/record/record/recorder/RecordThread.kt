@@ -203,14 +203,4 @@ class RecordThread(
 
     recorderListener.onRecord()
   }
-
-  /**
-   * Get results from all output writers.
-   * Returns a map of output path to error message (null if successful).
-   */
-  fun getOutputResults(): Map<String, String?> {
-    return outputWriters.mapNotNull { writer ->
-      writer.configuredPath?.let { path -> path to writer.getError() }
-    }.toMap()
-  }
 }

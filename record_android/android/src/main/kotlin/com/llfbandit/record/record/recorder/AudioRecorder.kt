@@ -182,14 +182,6 @@ class AudioRecorder(
     recorderRecordStreamHandler.sendRecordChunkEvent(chunk)
   }
 
-  /**
-   * Get the output results from all configured output writers.
-   * Returns a map of output path to error message (null if successful).
-   */
-  fun getOutputResults(): Map<String, String?> {
-    return recorderThread?.getOutputResults() ?: emptyMap()
-  }
-
   // Save initial audio manager settings
   @Suppress("DEPRECATION")
   private fun saveAudioManagerSettings() {

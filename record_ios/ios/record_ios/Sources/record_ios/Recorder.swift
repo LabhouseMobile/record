@@ -79,14 +79,9 @@ class Recorder {
       )
     }
 
-    // Create output writers for dual mode
-    let outputWriters: [AudioOutputWriter] = [
-      M4aFileOutputWriter(outputPath: basePath + ".m4a", bitRate: config.bitRateOutput ?? config.bitRate),
-      WavFileOutputWriter(outputPath: basePath + ".wav")
-    ]
-
     let delegate = RecorderMultiOutputDelegate(
-      outputWriters: outputWriters,
+      m4aWriter: M4aFileOutputWriter(outputPath: basePath + ".m4a", bitRate: config.bitRateOutput ?? config.bitRate),
+      wavWriter: WavFileOutputWriter(outputPath: basePath + ".wav"),
       manageAudioSession: manageAudioSession,
       onPause: {() -> () in self.updateState(RecordState.pause)},
       onStop: {() -> () in self.updateState(RecordState.stop)}
@@ -102,21 +97,7 @@ class Recorder {
   func stopDual(completionHandler: @escaping (_ map: [String: Any?]) -> ()) {
     if let d = delegate as? RecorderMultiOutputDelegate {
       stop { _ in
-        let outputResults = d.getOutputResults()
-        
-        // Results are keyed by output path; a path is only returned when its writer succeeded
-        let m4aKey = outputResults.keys.first { $0.hasSuffix(".m4a") }
-        let wavKey = outputResults.keys.first { $0.hasSuffix(".wav") }
-        let m4aError = m4aKey.flatMap { outputResults[$0] ?? nil }
-        let wavError = wavKey.flatMap { outputResults[$0] ?? nil }
-        
-        completionHandler([
-          "m4aPath": m4aError == nil ? m4aKey : nil,
-          "wavPath": wavError == nil ? wavKey : nil,
-          "m4aError": m4aError,
-          "wavError": wavError,
-          "m4aDroppedMs": d.getM4aDroppedMs()
-        ])
+        completionHandler(d.getOutputResult())
       }
     } else {
       stop { path in
