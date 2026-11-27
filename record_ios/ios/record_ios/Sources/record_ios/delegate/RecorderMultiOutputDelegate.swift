@@ -221,7 +221,9 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
   }
   
   func cancel() throws {
-    stop { _ in }
+    // A failed writer returns no output path, so its file is deleted by the configured one
+    let paths = outputWriters.map { $0.configuredPath }
+    stop { _ in paths.forEach { try? FileManager.default.removeItem(atPath: $0) } }
   }
   
   func getAmplitude() -> Float {

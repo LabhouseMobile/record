@@ -162,9 +162,9 @@ class RecordThread(
       }
 
       if (mHasBeenCanceled) {
-        // Delete all output files
+        // Delete all output files; a failed writer returns no output path, so use the configured one
         outputWriters.forEach { writer ->
-          writer.getOutputPath()?.let { path ->
+          writer.configuredPath?.let { path ->
             Utils.deleteFile(path)
           }
         }
