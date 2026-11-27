@@ -15,7 +15,8 @@ class MultiOutputResult {
   /// Error message from WAV writing, or null if successful
   final String? wavError;
 
-  /// Audio the M4A writer dropped (iOS only), or null if not measured
+  /// Audio missing from the M4A, in milliseconds (iOS only).
+  /// Null on other platforms and when the M4A writer never started.
   final int? m4aDroppedMs;
 
   /// Blob for the M4A output file, or null if writing failed
