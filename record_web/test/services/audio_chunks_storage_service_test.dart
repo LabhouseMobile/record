@@ -308,6 +308,25 @@ void main() {
       });
     });
 
+    group('getChunks in pages', () {
+      test('returns every chunk in index order across several pages', () async {
+        final pagedService = AudioChunksStorageService(readPageSize: 5);
+        await saveChunks('paged', 12);
+        await saveChunks('pagedz', 3);
+
+        final chunks = await pagedService.getChunks('paged');
+
+        expect(chunks.map((chunk) => chunk.single), List.generate(12, (i) => i));
+      });
+
+      test('returns every chunk when the count is a multiple of the page size', () async {
+        final pagedService = AudioChunksStorageService(readPageSize: 2);
+        await saveChunks('paged', 4);
+
+        expect(await pagedService.getChunks('paged'), hasLength(4));
+      });
+    });
+
     group('ids that extend another id with an underscore', () {
       test('are left out of the shorter id\'s reads and deletes', () async {
         await saveChunks('a', 2);

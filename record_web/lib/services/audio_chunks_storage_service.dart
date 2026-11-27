@@ -9,11 +9,15 @@ import 'metadata_storage_service.dart';
 /// Service to store audio chunks progressively using IndexedDB
 /// This allows recovery of recordings if the page is closed during recording
 class AudioChunksStorageService {
-  AudioChunksStorageService() {
+  AudioChunksStorageService({this.readPageSize = 5000}) {
     DatabaseManager.registerStore(kChunksStoreName);
   }
 
   static const kChunksStoreName = 'chunks';
+
+  /// Chunks per IndexedDB response when reading a recording back: one response for a whole multi-hour recording
+  /// (~115 MB per hour) could exceed a browser's per-response limit.
+  final int readPageSize;
 
   Future<void> saveChunk({
     required String recordingId,
@@ -41,22 +45,26 @@ class AudioChunksStorageService {
   }
 
   Future<Map<int, Uint8List>> _getChunksFrom(ObjectStore store, String recordingId) async {
-    final range = _keyRangeOf(recordingId);
-    // Both lists come back in key order, so they line up index by index.
-    final keys = await store.getAllKeys(range);
-    final values = await store.getAll(range);
     final chunks = <int, Uint8List>{};
+    var range = _keyRangeOf(recordingId);
 
-    for (var i = 0; i < keys.length; i++) {
-      final chunkIndex = int.parse(keys[i].toString().split('_').last);
-      final data = values[i];
+    while (true) {
+      // Both lists come back in key order, so they line up index by index.
+      final keys = await store.getAllKeys(range, readPageSize);
+      final values = await store.getAll(range, readPageSize);
 
-      if (data is Uint8List && data.isNotEmpty) {
-        chunks[chunkIndex] = data;
+      for (var i = 0; i < keys.length; i++) {
+        final chunkIndex = int.parse(keys[i].toString().split('_').last);
+        final data = values[i];
+
+        if (data is Uint8List && data.isNotEmpty) {
+          chunks[chunkIndex] = data;
+        }
       }
-    }
 
-    return chunks;
+      if (keys.length < readPageSize) return chunks;
+      range = KeyRange.bound(keys.last, _endOfRange(recordingId), true);
+    }
   }
 
   Future<void> deleteChunks(String recordingId) async {
