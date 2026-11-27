@@ -146,11 +146,12 @@ class RecordPluginWebWrapper extends RecordPlatform {
   /// The returned bytes are a complete WAV file with headers, ready to upload or save.
   @override
   Future<Uint8List?> recoverRecording(String path) async {
-    final chunks = await _chunksService.getChunks(path);
-    if (chunks.isEmpty) return null;
-
+    // Metadata first: chunks without it are leftovers of a deleted recording, and can be hundreds of MB.
     final metadata = await _metadataService.getMetadata(path);
     if (metadata == null) return null;
+
+    final chunks = await _chunksService.getChunks(path);
+    if (chunks.isEmpty) return null;
 
     final wavEncoder = _createWavEncoderFromMetadata(metadata);
     for (final chunk in chunks) {
