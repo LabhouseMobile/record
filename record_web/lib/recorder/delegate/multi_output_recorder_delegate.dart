@@ -136,8 +136,10 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
 
     unawaited(_deleteOrphanChunks());
 
-    // Awaited so the metadata exists before the first chunk: the orphan sweep deletes chunks without metadata.
-    await _saveMetadataForRecovery(
+    // The orphan sweep deletes chunks without metadata, so the metadata must exist before the first chunk: it is
+    // awaited before the PCM handler is connected, and written alongside the microphone setup meanwhile.
+    // Best-effort: if this write fails the chunks get swept, which loses nothing since recovery needs it too.
+    final metadataSaved = _saveMetadataForRecovery(
       recordingId: basePath,
       sampleRate: config.sampleRate.toInt(),
       numChannels: config.numChannels,
@@ -149,6 +151,8 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     await _setupMicrophoneCapture(config);
 
     await _setupMediaRecorder();
+
+    await metadataSaved;
 
     // Connect PCM data processing pipeline
     _workletNode?.port.onmessage = ((web.MessageEvent e) => _onPcmMessage(e)).toJS;
