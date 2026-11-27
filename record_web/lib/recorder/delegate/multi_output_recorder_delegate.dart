@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:record_platform_interface/record_platform_interface.dart';
 import 'package:record_web/encoder/wav_encoder.dart';
 import 'package:record_web/mime_types.dart';
+import 'package:record_web/recorder/delegate/multi_output_errors.dart';
 import 'package:record_web/recorder/delegate/recorder_delegate.dart';
 import 'package:record_web/recorder/recorder.dart';
 import 'package:record_web/services/audio_chunks_storage_service.dart';
@@ -205,11 +206,7 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
       m4aBlob: compressedBlob as html.Blob?,
       wavBlob: wavBlob as html.Blob?,
       m4aError: compressedBlob == null ? 'Compressed branch not available' : null,
-      wavError: switch ((wavBlob, compressedBlob)) {
-        (null, null) => 'WAV encoding failed or no data',
-        (null, _) => 'WAV not built: compressed branch available',
-        _ => null,
-      },
+      wavError: wavErrorFor(hasWav: wavBlob != null, hasCompressed: compressedBlob != null),
     );
 
     return result;
