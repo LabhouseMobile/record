@@ -25,7 +25,8 @@ class WavEncoder implements Encoder {
 
   @override
   web.Blob finish() {
-    final dataSize = numChannels * _numSamples * 2;
+    // _numSamples already counts every channel's samples: they arrive interleaved.
+    final dataSize = _numSamples * 2;
     final view = ByteData(44);
 
     view.setString(0, 'RIFF');

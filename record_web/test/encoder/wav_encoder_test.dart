@@ -35,6 +35,20 @@ void main() {
       },
     );
 
+    test('declares the data size of a stereo recording once, not per channel',
+        () async {
+      final encoder = WavEncoder(sampleRate: 16000, numChannels: 2)
+        ..encode(Int16List(4));
+
+      final bytes =
+          (await encoder.finish().arrayBuffer().toDart).toDart.asUint8List();
+      final header = ByteData.sublistView(bytes, 0, 44);
+
+      expect(header.getUint32(4, Endian.little), 36 + 8);
+      expect(header.getUint32(40, Endian.little), 8);
+      expect(bytes.length, 44 + 8);
+    });
+
     test(
       'writes only the bytes of a view, not its whole backing buffer',
       () async {
@@ -42,8 +56,8 @@ void main() {
         final encoder = WavEncoder(sampleRate: 16000, numChannels: 1)
           ..encode(Int16List.sublistView(backing, 1, 3));
 
-        final bytes = (await encoder.finish().arrayBuffer().toDart).toDart
-            .asUint8List();
+        final bytes =
+            (await encoder.finish().arrayBuffer().toDart).toDart.asUint8List();
 
         expect(Int16List.sublistView(Uint8List.fromList(bytes.sublist(44))), [
           1,
