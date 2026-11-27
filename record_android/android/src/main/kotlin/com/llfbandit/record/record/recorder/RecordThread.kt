@@ -162,9 +162,9 @@ class RecordThread(
       }
 
       if (mHasBeenCanceled) {
-        // Delete all output files
+        // Delete all output files; a failed writer returns no output path, so use the configured one
         outputWriters.forEach { writer ->
-          writer.getOutputPath()?.let { path ->
+          writer.configuredPath?.let { path ->
             Utils.deleteFile(path)
           }
         }
@@ -202,16 +202,5 @@ class RecordThread(
     mIsPausedSem.release()
 
     recorderListener.onRecord()
-  }
-
-  /**
-   * Get results from all output writers.
-   * Returns a map of output path to error message (null if successful).
-   */
-  fun getOutputResults(): Map<String, String?> {
-    return outputWriters.associate { writer ->
-      val path = writer.getOutputPath() ?: "unknown"
-      path to writer.getError()
-    }
   }
 }

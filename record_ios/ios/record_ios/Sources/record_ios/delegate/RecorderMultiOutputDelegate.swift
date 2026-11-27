@@ -18,16 +18,21 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
   private var isResuming = false
   private var isInterrupted = false
   private var isRestartPending = false
+  private let m4aWriter: M4aFileOutputWriter
+  private let wavWriter: WavFileOutputWriter
   private let outputWriters: [AudioOutputWriter]
   private var currentFramePosition: Int64 = 0
   
   init(
-    outputWriters: [AudioOutputWriter],
+    m4aWriter: M4aFileOutputWriter,
+    wavWriter: WavFileOutputWriter,
     manageAudioSession: Bool,
     onPause: @escaping () -> (),
     onStop: @escaping () -> ()
   ) {
-    self.outputWriters = outputWriters
+    self.m4aWriter = m4aWriter
+    self.wavWriter = wavWriter
+    self.outputWriters = [m4aWriter, wavWriter]
     self.manageAudioSession = manageAudioSession
     self.onPause = onPause
     self.onStop = onStop
@@ -180,15 +185,15 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
     recordEventHandler = nil
   }
   
-  /// Get results from all output writers
-  func getOutputResults() -> [String: String?] {
-    var results: [String: String?] = [:]
-    for writer in outputWriters {
-      if let path = writer.getOutputPath() ?? writer.getError() {
-        results[path] = writer.getError()
-      }
-    }
-    return results
+  /// The stopDual response; a path is only returned when its writer succeeded
+  func getOutputResult() -> [String: Any?] {
+    return [
+      "m4aPath": m4aWriter.getOutputPath(),
+      "wavPath": wavWriter.getOutputPath(),
+      "m4aError": m4aWriter.getError(),
+      "wavError": wavWriter.getError(),
+      "m4aDroppedMs": m4aWriter.droppedMs
+    ]
   }
   
   func pause() {
@@ -216,7 +221,9 @@ class RecorderMultiOutputDelegate: NSObject, AudioRecordingStreamDelegate {
   }
   
   func cancel() throws {
-    stop { _ in }
+    // A failed writer returns no output path, so its file is deleted by the configured one
+    let paths = outputWriters.map { $0.configuredPath }
+    stop { _ in paths.forEach { try? FileManager.default.removeItem(atPath: $0) } }
   }
   
   func getAmplitude() -> Float {

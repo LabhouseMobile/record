@@ -15,12 +15,33 @@ class EncoderOutputWriter(
   private val listener: EncoderListener
 ) : AudioOutputWriter {
   private var encoder: IEncoder? = null
+
+  // Volatile: codec and muxer failures arrive on the encoder's handler thread
+  @Volatile
   private var errorMessage: String? = null
 
+  private val trackingListener = object : EncoderListener {
+    override fun onEncoderFailure(ex: Exception) {
+      if (errorMessage == null) errorMessage = ex.message ?: ex.toString()
+      listener.onEncoderFailure(ex)
+    }
+
+    override fun onEncoderStream(bytes: ByteArray) = listener.onEncoderStream(bytes)
+  }
+
+  override val configuredPath: String?
+    get() = config.path
+
   override fun start() {
-    val (newEncoder, _) = format.getEncoder(config, listener)
-    encoder = newEncoder
-    encoder?.startEncoding()
+    try {
+      val (newEncoder, _) = format.getEncoder(config, trackingListener)
+      encoder = newEncoder
+      newEncoder.startEncoding()
+    } catch (ex: Exception) {
+      errorMessage = ex.message ?: ex.toString()
+      encoder = null
+      throw ex
+    }
   }
 
   override fun write(buffer: ByteArray) {
@@ -29,7 +50,7 @@ class EncoderOutputWriter(
     try {
       encoder?.encode(buffer)
     } catch (ex: Exception) {
-      errorMessage = ex.message
+      errorMessage = ex.message ?: ex.toString()
     }
   }
 
@@ -38,7 +59,7 @@ class EncoderOutputWriter(
       encoder?.stopEncoding()
     } catch (ex: Exception) {
       if (errorMessage == null) {
-        errorMessage = ex.message
+        errorMessage = ex.message ?: ex.toString()
       }
     }
   }

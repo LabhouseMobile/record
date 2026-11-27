@@ -1,3 +1,6 @@
+## 1.4.1
+* feat: Add `m4aDroppedMs` to `MultiOutputResult`.
+
 ## 1.4.0
 * feat: Add AudioInterruptionMode to `RecordConfig`.
 * feat: Add stream buffer size option.

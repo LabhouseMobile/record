@@ -127,6 +127,10 @@ class AudioRecorder {
   }
 
   /// Stops dual-output recording and returns both paths with per-branch errors.
+  ///
+  /// A path is only returned when its writer succeeded. A failed writer can
+  /// still leave a file at `$basePath.m4a` or `$basePath.wav`, which the caller
+  /// must delete.
   Future<MultiOutputResult> stopDual() async {
     return _safeCall(() async {
       _amplitudeTimer?.cancel();

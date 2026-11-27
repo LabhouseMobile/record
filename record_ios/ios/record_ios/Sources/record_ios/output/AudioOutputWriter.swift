@@ -29,5 +29,8 @@ protocol AudioOutputWriter {
   
   /// Get any error message that occurred during writing.
   func getError() -> String?
+
+  /// The path this writer writes to, whether or not writing succeeded.
+  var configuredPath: String { get }
 }
 

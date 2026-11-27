@@ -40,6 +40,8 @@ class RecorderWrapper(
   private val recorderRecordStreamHandler = RecorderRecordStreamHandler()
   private var recorder: IRecorder? = null
   private var bluetoothReceiver: BluetoothReceiver? = null
+  private var m4aWriter: EncoderOutputWriter? = null
+  private var wavWriter: WavFileOutputWriter? = null
 
   init {
     eventChannel = EventChannel(messenger, EVENTS_STATE_CHANNEL + recorderId)
@@ -49,6 +51,7 @@ class RecorderWrapper(
   }
 
   fun startRecordingToFile(config: RecordConfig, result: MethodChannel.Result) {
+    clearDualWriters()
     startRecording(config, emptyList(), result)
   }
 
@@ -56,6 +59,7 @@ class RecorderWrapper(
     if (config.useLegacy) {
       throw Exception("Cannot stream audio while using the legacy recorder")
     }
+    clearDualWriters()
     startRecording(config, emptyList(), result)
   }
 
@@ -64,9 +68,6 @@ class RecorderWrapper(
       throw Exception("Cannot stream audio while using the legacy recorder")
     }
 
-    // Create output writers for dual mode
-    val outputWriters = mutableListOf<AudioOutputWriter>()
-    
     // Add encoder output (M4A) - Force AAC encoding for M4A output
     // Create a modified config with AAC encoder for the M4A file
     val m4aConfig = RecordConfig(
@@ -94,19 +95,26 @@ class RecorderWrapper(
     val format = com.llfbandit.record.record.format.AacFormat()
     val encoderListener = object : EncoderListener {
       override fun onEncoderFailure(ex: Exception) {
-        // Errors are tracked internally by the writer
+        // EncoderOutputWriter records the failure and stopDual reports it
       }
       override fun onEncoderStream(bytes: ByteArray) {
         // Stream is handled separately by RecordThread
       }
     }
-    outputWriters.add(EncoderOutputWriter(m4aConfig, format, encoderListener))
+    val m4a = EncoderOutputWriter(m4aConfig, format, encoderListener)
     
     // Add WAV output
-    val wavPath = "$basePath.wav"
-    outputWriters.add(WavFileOutputWriter(config, wavPath))
+    val wav = WavFileOutputWriter(config, "$basePath.wav")
     
-    startRecording(config, outputWriters, result)
+    m4aWriter = m4a
+    wavWriter = wav
+    startRecording(config, listOf(m4a, wav), result)
+  }
+
+  // A single-output recording has no dual results to report
+  private fun clearDualWriters() {
+    m4aWriter = null
+    wavWriter = null
   }
 
 
@@ -186,23 +194,13 @@ class RecorderWrapper(
         return
       }
       
-      // Stop recording and get output results
+      // Stop recording; a path is only returned when its writer succeeded
       recorder?.stop { _ ->
-        val outputResults = if (recorder is AudioRecorder) {
-          (recorder as AudioRecorder).getOutputResults()
-        } else {
-          emptyMap()
-        }
-        
-        // Build response map with separate paths and errors
-        val m4aPath = outputResults.keys.firstOrNull { it.endsWith(".m4a") }
-        val wavPath = outputResults.keys.firstOrNull { it.endsWith(".wav") }
-        
         val response = mapOf(
-          "m4aPath" to m4aPath,
-          "wavPath" to wavPath,
-          "m4aError" to outputResults[m4aPath],
-          "wavError" to outputResults[wavPath]
+          "m4aPath" to m4aWriter?.getOutputPath(),
+          "wavPath" to wavWriter?.getOutputPath(),
+          "m4aError" to m4aWriter?.getError(),
+          "wavError" to wavWriter?.getError()
         )
         
         result.success(response)

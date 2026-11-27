@@ -1,3 +1,8 @@
+## 1.1.5
+* fix: `stopDual` fails the M4A when its writer drops more than 5 s of audio, stops encoding it, and reports `m4aDroppedMs`.
+* fix: `stopDual` reports a failed writer's error; a path is only returned when its writer succeeded.
+* fix: `cancel` deletes both files of a dual recording.
+
 ## 1.1.4
 * fix: Wrong deprecation on allowBluetooth on XCode 26.0.
 

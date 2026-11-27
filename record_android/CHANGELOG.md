@@ -1,3 +1,7 @@
+## 1.4.5
+* fix: `stopDual` reports M4A start, muxer and codec failures; a path is only returned when its writer succeeded.
+* fix: `cancel` deletes the file of a failed writer too.
+
 ## 1.4.4
 * fix: Start the recording foreground service with the `microphone` service type (Android 11+) so the OS keeps writing audio frames while the app is backgrounded, preventing silent recording truncation on OEM-skinned devices.
 

@@ -62,6 +62,10 @@ class WavFileOutputWriter: AudioOutputWriter {
     return errorMessage == nil ? outputPath : nil
   }
   
+  var configuredPath: String {
+    return outputPath
+  }
+  
   func getError() -> String? {
     return errorMessage
   }
