@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:js_interop';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_web_plugins/flutter_web_plugins.dart';
 import 'package:record_platform_interface/record_platform_interface.dart';
@@ -18,16 +19,39 @@ class RecordPluginWeb {
 }
 
 class RecordPluginWebWrapper extends RecordPlatform {
+  RecordPluginWebWrapper({
+    AudioChunksStorageService? chunksService,
+    MetadataStorageService? metadataService,
+  })  : _chunksService = chunksService ?? AudioChunksStorageService(),
+        _metadataService = metadataService ?? MetadataStorageService();
+
   // recorders from recorderId
   final _recorders = <String, Recorder>{};
 
   // Shared storage services for recovery
-  final _chunksService = AudioChunksStorageService();
-  final _metadataService = MetadataStorageService();
+  final AudioChunksStorageService _chunksService;
+  final MetadataStorageService _metadataService;
+
+  Future<void>? _orphanSweep;
+
+  /// The orphan sweep started by the first [create], if any.
+  @visibleForTesting
+  Future<void>? get orphanSweep => _orphanSweep;
 
   @override
   Future<void> create(String recorderId) async {
     _recorders[recorderId] = Recorder();
+    // Once per page load, so a recording discarded just before a tab closed doesn't wait for the next recording to
+    // leave IndexedDB. Safe alongside a live recording in any tab: the sweep only deletes chunks without metadata.
+    _orphanSweep ??= _deleteOrphanChunks();
+  }
+
+  Future<void> _deleteOrphanChunks() async {
+    try {
+      await _chunksService.deleteOrphanChunks();
+    } catch (e) {
+      if (kDebugMode) print('[record_web] Error deleting orphan chunks: $e');
+    }
   }
 
   @override
@@ -146,11 +170,12 @@ class RecordPluginWebWrapper extends RecordPlatform {
   /// The returned bytes are a complete WAV file with headers, ready to upload or save.
   @override
   Future<Uint8List?> recoverRecording(String path) async {
-    final chunks = await _chunksService.getChunks(path);
-    if (chunks.isEmpty) return null;
-
+    // Metadata first: chunks without it are leftovers of a deleted recording, and can be hundreds of MB.
     final metadata = await _metadataService.getMetadata(path);
     if (metadata == null) return null;
+
+    final chunks = await _chunksService.getChunks(path);
+    if (chunks.isEmpty) return null;
 
     final wavEncoder = _createWavEncoderFromMetadata(metadata);
     for (final chunk in chunks) {
@@ -205,7 +230,8 @@ class RecordPluginWebWrapper extends RecordPlatform {
   /// or if the user chooses to discard the pending recording.
   @override
   Future<void> deleteRecording(String path) async {
-    await _chunksService.deleteChunks(path);
+    // Metadata first: chunks left without it if this is interrupted are deleted by the orphan sweep.
     await _metadataService.deleteMetadata(path);
+    await _chunksService.deleteChunks(path);
   }
 }

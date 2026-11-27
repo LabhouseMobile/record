@@ -12,7 +12,8 @@ class MultiOutputResult {
   /// Error message from M4A encoding, or null if successful
   final String? m4aError;
 
-  /// Error message from WAV writing, or null if successful
+  /// Error message from WAV writing, or null if successful.
+  /// On web, also null when the WAV was skipped because [m4aBlob] is set.
   final String? wavError;
 
   /// Audio missing from the M4A, in milliseconds (iOS only).
@@ -22,7 +23,8 @@ class MultiOutputResult {
   /// Blob for the M4A output file, or null if writing failed
   final html.Blob? m4aBlob;
 
-  /// Blob for the WAV output file, or null if writing failed
+  /// Blob for the WAV output file, or null if writing failed.
+  /// On web it is only built when there is no [m4aBlob], so it is null whenever [m4aBlob] is set.
   final html.Blob? wavBlob;
 
   const MultiOutputResult({

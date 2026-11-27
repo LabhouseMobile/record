@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:record_platform_interface/record_platform_interface.dart';
 import 'package:record_web/encoder/wav_encoder.dart';
 import 'package:record_web/mime_types.dart';
+import 'package:record_web/recorder/delegate/multi_output_errors.dart';
 import 'package:record_web/recorder/delegate/recorder_delegate.dart';
 import 'package:record_web/recorder/recorder.dart';
 import 'package:record_web/services/audio_chunks_storage_service.dart';
@@ -16,7 +17,7 @@ import 'package:web/web.dart' as web;
 
 /// Web delegate that supports dual-output recording:
 /// - Streams PCM S16LE frames to Dart
-/// - Persists PCM chunks to IndexedDB (used as the WAV source on stop and for crash recovery)
+/// - Persists PCM chunks to IndexedDB (for crash recovery, and as the WAV source when MediaRecorder produced nothing)
 /// - Writes AAC/Opus using MediaRecorder
 class MultiOutputRecorderDelegate extends RecorderDelegate {
   final OnStateChanged onStateChanged;
@@ -40,12 +41,12 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
   // Chunk counter for storage
   int _pcmChunkCount = 0;
 
-  // Persistent storage for crash recovery — also the source of truth for the WAV blob on stop
+  // Persistent storage for crash recovery, and the WAV source when there is no compressed file
   final _chunksService = AudioChunksStorageService();
   final _metadataService = MetadataStorageService();
   String? _currentRecordingId;
 
-  // In-flight IndexedDB writes; awaited on stop so the WAV reflects every captured chunk
+  // In-flight IndexedDB writes; the WAV read-back waits for them so it covers every captured chunk
   final List<Future<void>> _pendingWrites = [];
 
   MultiOutputRecorderDelegate({required this.onStateChanged});
@@ -133,7 +134,12 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     // Reset counter
     _pcmChunkCount = 0;
 
-    _saveMetadataForRecovery(
+    unawaited(_deleteOrphanChunks());
+
+    // The orphan sweep deletes chunks without metadata, so the metadata must exist before the first chunk: it is
+    // awaited before the PCM handler is connected, and written alongside the microphone setup meanwhile.
+    // Best-effort: if this write fails the chunks get swept, which loses nothing since recovery needs it too.
+    final metadataSaved = _saveMetadataForRecovery(
       recordingId: basePath,
       sampleRate: config.sampleRate.toInt(),
       numChannels: config.numChannels,
@@ -146,6 +152,8 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
 
     await _setupMediaRecorder();
 
+    await metadataSaved;
+
     // Connect PCM data processing pipeline
     _workletNode?.port.onmessage = ((web.MessageEvent e) => _onPcmMessage(e)).toJS;
 
@@ -156,12 +164,12 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     return _recordStreamCtrl!.stream;
   }
 
-  void _saveMetadataForRecovery({
+  Future<void> _saveMetadataForRecovery({
     required String recordingId,
     required int sampleRate,
     required int numChannels,
   }) {
-    _metadataService
+    return _metadataService
         .saveMetadata(
       recordingId: recordingId,
       sampleRate: sampleRate,
@@ -181,7 +189,9 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     _context = null;
 
     final compressedBlob = await _stopMediaRecorder();
-    final wavBlob = await _buildWavFromStoredChunks();
+    // Rebuilding the WAV reads every stored chunk back, so its cost grows with the
+    // recording length: only pay it when there is no compressed file to return.
+    final wavBlob = compressedBlob == null ? await _buildWavFromStoredChunks() : null;
 
     onStateChanged(RecordState.stop);
 
@@ -189,7 +199,7 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
 
     final currentRecordingId = _currentRecordingId;
     if (currentRecordingId != null) {
-      await _deleteStoredRecording(currentRecordingId);
+      await _forgetStoredRecording(currentRecordingId);
       _currentRecordingId = null;
     }
 
@@ -199,22 +209,39 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
       m4aBlob: compressedBlob as html.Blob?,
       wavBlob: wavBlob as html.Blob?,
       m4aError: compressedBlob == null ? 'Compressed branch not available' : null,
-      wavError: wavBlob == null ? 'WAV encoding failed or no data' : null,
+      wavError: wavErrorFor(hasWav: wavBlob != null, hasCompressed: compressedBlob != null),
     );
 
     return result;
   }
 
-  Future<void> _deleteStoredRecording(String recordingId) async {
+  /// Makes [recordingId] unrecoverable right away by deleting its metadata, then deletes its chunks in the
+  /// background: that delete grows with the recording length (~2.5 s per hour). It needn't wait for in-flight
+  /// chunk writes: they created their transactions first, and IndexedDB runs overlapping transactions in creation
+  /// order. Chunks left behind by a tab closed meanwhile are deleted by the orphan sweep.
+  Future<void> _forgetStoredRecording(String recordingId) async {
+    _pendingWrites.clear();
+    try {
+      await _metadataService.deleteMetadata(recordingId);
+    } catch (e) {
+      if (kDebugMode) print('[record_web] Error deleting stored metadata: $e');
+    }
+    unawaited(_deleteChunks(recordingId));
+  }
+
+  Future<void> _deleteChunks(String recordingId) async {
     try {
       await _chunksService.deleteChunks(recordingId);
     } catch (e) {
       if (kDebugMode) print('[record_web] Error deleting stored chunks: $e');
     }
+  }
+
+  Future<void> _deleteOrphanChunks() async {
     try {
-      await _metadataService.deleteMetadata(recordingId);
+      await _chunksService.deleteOrphanChunks();
     } catch (e) {
-      if (kDebugMode) print('[record_web] Error deleting stored metadata: $e');
+      if (kDebugMode) print('[record_web] Error deleting orphan chunks: $e');
     }
   }
 
@@ -234,10 +261,6 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     // Stop media recorder without waiting for data
     _cancelMediaRecorder();
 
-    // Drop any pending writes — a cancelled recording shouldn't survive in IndexedDB,
-    // and we explicitly purge the stored chunks/metadata below.
-    _pendingWrites.clear();
-
     // Clear compressed chunks
     _compressedChunks = [];
 
@@ -247,7 +270,7 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
 
     final cancelledRecordingId = _currentRecordingId;
     if (cancelledRecordingId != null) {
-      await _deleteStoredRecording(cancelledRecordingId);
+      await _forgetStoredRecording(cancelledRecordingId);
       _currentRecordingId = null;
     }
 
@@ -300,17 +323,19 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
     _pendingWrites.add(write);
   }
 
+  /// Waits for every in-flight chunk write, so the WAV read-back sees all of them.
+  Future<void> _drainPendingWrites() async {
+    if (_pendingWrites.isEmpty) return;
+    final inFlight = List<Future<void>>.from(_pendingWrites);
+    _pendingWrites.clear();
+    await Future.wait(inFlight);
+  }
+
   Future<web.Blob?> _buildWavFromStoredChunks() async {
     final recordingId = _currentRecordingId;
     if (recordingId == null) return null;
 
-    // Make sure every in-flight write has landed before we read back.
-    if (_pendingWrites.isNotEmpty) {
-      final inFlight = List<Future<void>>.from(_pendingWrites);
-      _pendingWrites.clear();
-      await Future.wait(inFlight);
-    }
-
+    await _drainPendingWrites();
     try {
       final chunks = await _chunksService.getChunks(recordingId);
       if (chunks.isEmpty) return null;

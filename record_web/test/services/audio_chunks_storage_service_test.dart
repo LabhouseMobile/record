@@ -4,10 +4,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:idb_shim/idb_io.dart';
 import 'package:record_web/services/audio_chunks_storage_service.dart';
 import 'package:record_web/services/database_manager.dart';
+import 'package:record_web/services/metadata_storage_service.dart';
 
 void main() {
   group('AudioChunksStorageService', () {
     late AudioChunksStorageService service;
+    late MetadataStorageService metadataService;
     late IdbFactory factory;
 
     setUp(() {
@@ -15,7 +17,14 @@ void main() {
       factory = idbFactoryMemoryFs;
       DatabaseManager.instance.setFactory(factory);
       service = AudioChunksStorageService();
+      metadataService = MetadataStorageService();
     });
+
+    Future<void> saveChunks(String recordingId, int count) async {
+      for (var i = 0; i < count; i++) {
+        await service.saveChunk(recordingId: recordingId, chunkIndex: i, chunkData: Uint8List.fromList([i]));
+      }
+    }
 
     tearDown(() async {
       await DatabaseManager.instance.close();
@@ -131,6 +140,25 @@ void main() {
           expect(result[2], equals(chunk2));
         });
 
+        test(
+          'chunks in numeric order when keys sort differently as text',
+          () async {
+            const recordingId = 'test-recording-id';
+
+            for (final index in [10, 2, 1]) {
+              await service.saveChunk(
+                recordingId: recordingId,
+                chunkIndex: index,
+                chunkData: Uint8List.fromList([index]),
+              );
+            }
+
+            final result = await service.getChunks(recordingId);
+
+            expect(result.map((chunk) => chunk.single), [1, 2, 10]);
+          },
+        );
+
         test('only chunks for specified recordingId', () async {
           const recordingId = 'test-recording-id';
           const otherRecordingId = 'other-recording-id';
@@ -214,6 +242,101 @@ void main() {
           expect(otherResult, hasLength(1));
           expect(otherResult[0], equals(otherChunk));
         });
+      });
+    });
+
+    group('deleteOrphanChunks', () {
+      test('deletes the chunks of recordings without metadata', () async {
+        await saveChunks('orphan-a', 3);
+        await saveChunks('orphan-b', 2);
+
+        await service.deleteOrphanChunks();
+
+        expect(await service.getChunks('orphan-a'), isEmpty);
+        expect(await service.getChunks('orphan-b'), isEmpty);
+      });
+
+      test('keeps the chunks of recordings that still have metadata', () async {
+        await metadataService.saveMetadata(recordingId: 'recoverable', sampleRate: 16000, numChannels: 1);
+        await saveChunks('recoverable', 3);
+        await saveChunks('orphan', 2);
+
+        await service.deleteOrphanChunks();
+
+        expect(await service.getChunks('recoverable'), hasLength(3));
+        expect(await service.getChunks('orphan'), isEmpty);
+      });
+
+      test('checks every recording, whichever order their keys sort in', () async {
+        for (final id in ['a-orphan', 'b-kept', 'c-orphan', 'd-kept']) {
+          if (id.endsWith('kept')) {
+            await metadataService.saveMetadata(recordingId: id, sampleRate: 16000, numChannels: 1);
+          }
+          await saveChunks(id, 12);
+        }
+
+        await service.deleteOrphanChunks();
+
+        expect(await service.getChunks('a-orphan'), isEmpty);
+        expect(await service.getChunks('b-kept'), hasLength(12));
+        expect(await service.getChunks('c-orphan'), isEmpty);
+        expect(await service.getChunks('d-kept'), hasLength(12));
+      });
+
+      test('completes when there are no chunks', () async {
+        await expectLater(service.deleteOrphanChunks(), completes);
+      });
+
+      test('keeps a recording whose id extends an orphan id with an underscore', () async {
+        await metadataService.saveMetadata(recordingId: 'a_b', sampleRate: 16000, numChannels: 1);
+        await saveChunks('a', 2);
+        await saveChunks('a_b', 3);
+
+        await service.deleteOrphanChunks();
+
+        expect(await service.getChunks('a'), isEmpty);
+        expect(await service.getChunks('a_b'), hasLength(3));
+      });
+
+      test('still checks a recording whose id extends an orphan id with an underscore', () async {
+        await saveChunks('a', 2);
+        await saveChunks('a_b', 3);
+
+        await service.deleteOrphanChunks();
+
+        expect(await service.getChunks('a_b'), isEmpty);
+      });
+    });
+
+    group('getChunks in pages', () {
+      test('returns every chunk in index order across several pages', () async {
+        final pagedService = AudioChunksStorageService(readPageSize: 5);
+        await saveChunks('paged', 12);
+        await saveChunks('pagedz', 3);
+
+        final chunks = await pagedService.getChunks('paged');
+
+        expect(chunks.map((chunk) => chunk.single), List.generate(12, (i) => i));
+      });
+
+      test('returns every chunk when the count is a multiple of the page size', () async {
+        final pagedService = AudioChunksStorageService(readPageSize: 2);
+        await saveChunks('paged', 4);
+
+        expect(await pagedService.getChunks('paged'), hasLength(4));
+      });
+    });
+
+    group('ids that extend another id with an underscore', () {
+      test('are left out of the shorter id\'s reads and deletes', () async {
+        await saveChunks('a', 2);
+        await saveChunks('a_b', 3);
+
+        expect(await service.getChunks('a'), hasLength(2));
+
+        await service.deleteChunks('a');
+
+        expect(await service.getChunks('a_b'), hasLength(3));
       });
     });
 

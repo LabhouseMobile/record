@@ -10,19 +10,23 @@ class WavEncoder implements Encoder {
   final int sampleRate;
   final int numChannels;
   int _numSamples = 0;
-  List<int> _dataViews = []; // Uint8List
+  List<Uint8List> _parts = [];
 
   WavEncoder({required this.sampleRate, required this.numChannels});
 
+  /// Keeps a reference to [buffer] until [finish]: callers must not reuse it.
   @override
   void encode(Int16List buffer) {
-    _dataViews.addAll(buffer.buffer.asUint8List());
+    _parts.add(
+      buffer.buffer.asUint8List(buffer.offsetInBytes, buffer.lengthInBytes),
+    );
     _numSamples += buffer.length;
   }
 
   @override
   web.Blob finish() {
-    final dataSize = numChannels * _numSamples * 2;
+    // _numSamples already counts every channel's samples: they arrive interleaved.
+    final dataSize = _numSamples * 2;
     final view = ByteData(44);
 
     view.setString(0, 'RIFF');
@@ -39,11 +43,13 @@ class WavEncoder implements Encoder {
     view.setString(36, 'data');
     view.setUint32(40, dataSize, Endian.little);
 
-    _dataViews.insertAll(0, view.buffer.asUint8List());
-
     final blob = web.Blob(
-        <JSUint8Array>[Uint8List.fromList(_dataViews).toJS].toJS,
-        web.BlobPropertyBag(type: 'audio/wav'));
+      <JSUint8Array>[
+        view.buffer.asUint8List().toJS,
+        for (final part in _parts) part.toJS,
+      ].toJS,
+      web.BlobPropertyBag(type: 'audio/wav'),
+    );
 
     cleanup();
 
@@ -51,7 +57,7 @@ class WavEncoder implements Encoder {
   }
 
   @override
-  void cleanup() => _dataViews = [];
+  void cleanup() => _parts = [];
 }
 
 extension ByteDataExt on ByteData {

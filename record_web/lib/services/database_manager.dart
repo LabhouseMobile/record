@@ -12,7 +12,7 @@ class DatabaseManager {
 
   static final List<String> _registeredStores = [];
 
-  Database? _db;
+  Future<Database>? _opening;
   IdbFactory? _customFactory;
 
   /// Register a store name that should be created in the database
@@ -28,30 +28,32 @@ class DatabaseManager {
     _customFactory = factory;
   }
 
+  /// Concurrent callers share one open, so a page never holds two connections. A failed open is retried by the
+  /// next call.
   Future<Database> getDatabase() async {
-    final db = _db;
-    if (db != null) return db;
+    final opening = _opening ??= _open();
+    try {
+      return await opening;
+    } catch (_) {
+      if (identical(_opening, opening)) _opening = null;
+      rethrow;
+    }
+  }
 
+  Future<Database> _open() async {
     final factory = _customFactory ?? getIdbFactory();
 
     if (factory == null) {
       throw Exception('No database factory found');
     }
 
-    _db = await factory.open(
+    return factory.open(
       kDbName,
       version: kDbVersion,
       onUpgradeNeeded: (VersionChangeEvent event) {
         _createAllRequiredStores(event.database);
       },
     );
-
-    final openedDb = _db;
-    if (openedDb == null) {
-      throw Exception('Failed to open database');
-    }
-
-    return openedDb;
   }
 
   void _createAllRequiredStores(Database db) {
@@ -68,8 +70,20 @@ class DatabaseManager {
     return db.transaction(storeName, mode);
   }
 
+  /// Get one transaction spanning several stores, so reads and writes across them are atomic
+  Future<Transaction> getTransactionList(List<String> storeNames, String mode) async {
+    final db = await getDatabase();
+    return db.transactionList(storeNames, mode);
+  }
+
   Future<void> close() async {
-    _db?.close();
-    _db = null;
+    final opening = _opening;
+    _opening = null;
+    if (opening == null) return;
+    try {
+      (await opening).close();
+    } catch (_) {
+      // Nothing to close: the open failed.
+    }
   }
 }
