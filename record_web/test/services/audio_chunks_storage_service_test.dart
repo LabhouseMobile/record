@@ -286,6 +286,39 @@ void main() {
       test('completes when there are no chunks', () async {
         await expectLater(service.deleteOrphanChunks(), completes);
       });
+
+      test('keeps a recording whose id extends an orphan id with an underscore', () async {
+        await metadataService.saveMetadata(recordingId: 'a_b', sampleRate: 16000, numChannels: 1);
+        await saveChunks('a', 2);
+        await saveChunks('a_b', 3);
+
+        await service.deleteOrphanChunks();
+
+        expect(await service.getChunks('a'), isEmpty);
+        expect(await service.getChunks('a_b'), hasLength(3));
+      });
+
+      test('still checks a recording whose id extends an orphan id with an underscore', () async {
+        await saveChunks('a', 2);
+        await saveChunks('a_b', 3);
+
+        await service.deleteOrphanChunks();
+
+        expect(await service.getChunks('a_b'), isEmpty);
+      });
+    });
+
+    group('ids that extend another id with an underscore', () {
+      test('are left out of the shorter id\'s reads and deletes', () async {
+        await saveChunks('a', 2);
+        await saveChunks('a_b', 3);
+
+        expect(await service.getChunks('a'), hasLength(2));
+
+        await service.deleteChunks('a');
+
+        expect(await service.getChunks('a_b'), hasLength(3));
+      });
     });
 
     group('multiple operations', () {

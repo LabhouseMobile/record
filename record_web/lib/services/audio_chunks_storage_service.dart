@@ -80,7 +80,7 @@ class AudioChunksStorageService {
 
       final recordingId = key.substring(0, key.lastIndexOf('_'));
       await _deleteChunksIfNoMetadata(recordingId);
-      after = '${recordingId}_\uffff';
+      after = _endOfRange(recordingId);
     }
   }
 
@@ -104,8 +104,12 @@ class AudioChunksStorageService {
     await transaction.completed;
   }
 
-  /// Every key that starts with `${recordingId}_`: chunk keys are `${recordingId}_<index>`.
-  KeyRange _keyRangeOf(String recordingId) => KeyRange.bound('${recordingId}_', '${recordingId}_\uffff');
+  /// Every `${recordingId}_<index>` key. Bounding on the index's digits keeps the chunks of an id like `a_b` out of
+  /// `a`'s range; an id that starts with `<other id>_<digit>` still falls in the other id's range.
+  KeyRange _keyRangeOf(String recordingId) => KeyRange.bound('${recordingId}_0', _endOfRange(recordingId));
+
+  /// `9` then the highest UTF-16 code unit, so it sorts after every `${recordingId}_<index>` key.
+  String _endOfRange(String recordingId) => '${recordingId}_9\uffff';
 
   Future<Transaction> _getTransaction(String mode) {
     return DatabaseManager.instance.getTransaction(kChunksStoreName, mode);
