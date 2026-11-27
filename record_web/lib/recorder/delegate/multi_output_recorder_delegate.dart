@@ -17,7 +17,7 @@ import 'package:web/web.dart' as web;
 
 /// Web delegate that supports dual-output recording:
 /// - Streams PCM S16LE frames to Dart
-/// - Persists PCM chunks to IndexedDB (used as the WAV source on stop and for crash recovery)
+/// - Persists PCM chunks to IndexedDB (for crash recovery, and as the WAV source when MediaRecorder produced nothing)
 /// - Writes AAC/Opus using MediaRecorder
 class MultiOutputRecorderDelegate extends RecorderDelegate {
   final OnStateChanged onStateChanged;
@@ -41,7 +41,7 @@ class MultiOutputRecorderDelegate extends RecorderDelegate {
   // Chunk counter for storage
   int _pcmChunkCount = 0;
 
-  // Persistent storage for crash recovery — also the source of truth for the WAV blob on stop
+  // Persistent storage for crash recovery, and the WAV source when there is no compressed file
   final _chunksService = AudioChunksStorageService();
   final _metadataService = MetadataStorageService();
   String? _currentRecordingId;
